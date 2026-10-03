@@ -1,120 +1,70 @@
-# Atlas AI --- AI-Assisted Development Rules
+Rule 1 — AI never decides architecture
+The team decides:
+- schema
+- API design
+- module boundaries
+- database structure
+- algorithms
+- dependencies
+AI can implement them.
+Rule 2 — Every AI-generated feature needs documentation
+For every significant feature:
+What?
+Why?
+How?
+Inputs?
+Outputs?
+Dependencies?
+Trade-offs?
+Known limitations?
 
-## 1. Principle
+Rule 3 — No giant prompts
+Don't tell Antigravity:
+"Build the entire Atlas backend."
 
-AI coding tools such as Antigravity are development assistants. They do
-not own the architecture, requirements, or engineering decisions of
-Atlas AI.
+Instead:
+"Implement repository scanner that recursively identifies .py files and returns normalized file metadata. Do not modify other modules."
 
-Humans remain responsible for: - requirements; - architecture; -
-security; - correctness; - review; - integration; - final decisions.
+Then review.
+Rule 4 — Small commits
+Prefer:
+feat(parser): add python file scanner
 
-## 2. Standard Workflow
+feat(parser): extract function definitions
 
-``` text
-Human requirement
-      ↓
-Task design
-      ↓
-Antigravity implementation
-      ↓
-Human code review
-      ↓
-Automated tests
-      ↓
-Integration test
-      ↓
-Documentation update
-      ↓
-Commit
-```
+feat(graph): add File nodes
 
-## 3. Prompt Scope
+feat(graph): add CONTAINS relationships
 
-Do not ask an AI coding tool to build the entire project in one prompt.
+over:
+feat: implement atlas
 
-Prefer small tasks such as: - create Neo4j connection module; -
-implement Python file scanner; - extract function declarations; - add
-one relationship resolver; - add one API endpoint; - write tests for one
-component.
+Rule 5 — Every important algorithm gets a human-readable explanation
+Especially:
+- graph construction
+- CALLS extraction
+- embeddings
+- retrieval
+- impact analysis
+- risk score
+If your professor asks:
+"Why did you use BFS?"
 
-## 4. Architecture Control
+you need to answer without asking Antigravity.
+Rule 6 — Tests are mandatory
+AI-generated code should actually be tested.
+At minimum:
+Unit tests
+Integration tests
+Parser fixtures
+Graph tests
+API tests
 
-AI-generated code must follow the existing project architecture.
+Rule 7 — No dependency without justification
+If Antigravity says:
+"Install this package."
 
-AI tools must not introduce: - a new database; - a new message queue; -
-a new framework; - a new service boundary; - a new dependency;
+Ask:
+Why?
 
-without an explicit human decision.
-
-## 5. Code Quality
-
-Generated code must: - be readable; - use clear names; - have
-appropriate type hints; - handle expected errors; - avoid unnecessary
-abstraction; - avoid duplicated logic; - include tests for important
-behavior.
-
-## 6. Explainability
-
-For non-trivial generated code, the developer must be able to explain: -
-what it does; - why it exists; - its inputs and outputs; - important
-assumptions; - failure cases; - performance implications.
-
-If the team cannot explain the code, it should not be merged unchanged.
-
-## 7. Testing
-
-No significant feature is considered complete without appropriate tests.
-
-Parser and resolver changes must include cases covering: - valid
-syntax; - expected extraction; - ambiguous/unresolvable cases; -
-relationship correctness.
-
-## 8. Documentation
-
-When behavior or architecture changes, update the relevant
-documentation.
-
-At minimum: - architecture changes → `ARCHITECTURE.md` / decisions; -
-graph changes → `GRAPH_SCHEMA.md`; - API changes → `API.md`; -
-requirements/scope changes → `REQUIREMENTS.md` / `P0_SPEC.md`.
-
-## 9. Git Discipline
-
-Prefer small commits with meaningful messages.
-
-Examples:
-
-``` text
-feat(parser): extract python functions
-feat(graph): persist class containment
-feat(impact): add dependent traversal
-test(parser): cover nested functions
-docs(graph): document call relationship
-```
-
-Avoid giant commits containing unrelated changes.
-
-## 10. AI Output Review Checklist
-
-Before merging AI-generated code:
-
--   [ ] Does it match the requirement?
--   [ ] Does it respect the current architecture?
--   [ ] Are dependencies justified?
--   [ ] Is error handling appropriate?
--   [ ] Are tests present?
--   [ ] Is the implementation understandable?
--   [ ] Are performance implications understood?
--   [ ] Is documentation updated?
--   [ ] Does the feature remain inside P0 scope?
-
-## 11. Scope Protection
-
-AI tools must not silently expand P0.
-
-If implementation suggests: - embeddings; - LLM calls; - vector
-databases; - authentication; - distributed workers; - additional
-languages;
-
-stop and raise the decision with the technical lead.
+Don't accumulate 70 packages.
