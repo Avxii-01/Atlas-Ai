@@ -1,8 +1,7 @@
 name: Bug
 description: Report a reproducible problem.
-title: "[BUG] "
-labels:
-  - bug
+title: "[BUG]: "
+labels: ["bug"]
 body:
   - type: textarea
     id: description
@@ -18,9 +17,9 @@ body:
       label: Steps to Reproduce
       description: Provide the steps required to reproduce the issue.
       placeholder: |
-        1.
-        2.
-        3.
+        1. Go to...
+        2. Click on...
+        3. See error...
     validations:
       required: true
 
@@ -42,4 +41,6 @@ body:
     id: tests
     attributes:
       label: Validation
-      description: How should the fix be tested?
+      description: How should the fix be verified and tested?
+    validations:
+      required: false
