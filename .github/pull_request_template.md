@@ -1,3 +1,17 @@
+PR title convention
+
+[P0-XX] Short description
+
+Examples:
+
+[P0-06] Integrate Tree-sitter Python parsing
+[P0-09] Implement relationship resolver
+[P0-16] Implement dependency traversal
+[P0-22] Implement graph visualization
+
+To Make Our GitHub History Readable
+
+
 ## Related Issue
 
 Closes #
@@ -31,5 +45,4 @@ Closes #
 
 - [ ] Code follows project architecture
 - [ ] Tests added/updated
-- [ ] CI passes
 - [ ] Ready for review

@@ -1,0 +1,67 @@
+name: Feature / Task
+description: Create a task or feature for the project.
+title: "[P0] "
+labels:
+  - P0
+body:
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: What needs to be implemented or completed?
+      placeholder: Clearly describe the objective of this issue.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is included in this issue?
+      placeholder: |
+        - 
+        - 
+        -
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: What conditions must be satisfied for this issue to be considered complete?
+      placeholder: |
+        - [ ] 
+        - [ ] 
+        - [ ]
+    validations:
+      required: true
+
+  - type: textarea
+    id: tests
+    attributes:
+      label: Testing Requirements
+      description: What tests should be added or updated?
+      placeholder: |
+        - Unit tests:
+        - Integration tests:
+        - Other validation:
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: List issues or components that must be completed first.
+      placeholder: |
+        Depends on:
+        Blocks:
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of Scope
+      description: What should explicitly NOT be implemented as part of this issue?
+      placeholder: |
+        - 
+        - 
+        -
