@@ -71,3 +71,45 @@ decisions.
 
 **Reason:** The project is both an engineering system and an academic
 project where the team must understand and defend the implementation.
+
+## ADR-008: Python Dependency Management with uv
+
+### Status
+
+Accepted
+
+### Context
+
+Atlas AI is a multi-developer Python project with a growing backend dependency
+set including FastAPI, the Neo4j Python driver, Tree-sitter, testing tools,
+and future analysis components.
+
+The project needs a dependency-management approach that provides:
+
+- reproducible development environments
+- consistent dependency resolution across developers
+- compatibility with Docker
+- compatibility with CI/CD
+- explicit project dependencies
+- deterministic dependency versions
+- minimal manual environment setup
+- a workflow that remains maintainable as the backend grows
+
+The project also follows the principle that dependencies should not be added
+without justification.
+
+### Decision
+
+Atlas AI will use:
+
+- `pyproject.toml` as the Python project configuration and dependency declaration
+- `uv` as the Python dependency and environment manager
+- `uv.lock` as the committed dependency lockfile
+
+These files will live inside the backend project:
+
+```text
+backend/
+├── pyproject.toml
+├── uv.lock
+└── ...
