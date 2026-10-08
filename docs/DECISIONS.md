@@ -113,3 +113,42 @@ backend/
 ├── pyproject.toml
 ├── uv.lock
 └── ...
+
+## ADR-009: Docker Compose Development Environment
+
+### Status
+
+Accepted
+
+### Context
+
+Atlas AI requires a reproducible local development environment containing the
+backend application and Neo4j graph database.
+
+The environment must allow multiple developers to start the project consistently
+without requiring each developer to install and configure Neo4j manually.
+
+The P0 development environment must support:
+
+- FastAPI backend execution
+- Neo4j graph database execution
+- backend-to-Neo4j communication
+- persistent local Neo4j data
+- environment-based configuration
+- reproducible startup
+- local Neo4j inspection through the browser
+- future CI compatibility
+
+The environment is intended for development only. Production deployment,
+Kubernetes, authentication infrastructure, Redis, and other infrastructure are
+outside the scope of P0.
+
+### Decision
+
+Atlas AI will use Docker Compose as the local development orchestration layer.
+
+The initial Compose environment will contain two services:
+
+```text
+backend
+neo4j

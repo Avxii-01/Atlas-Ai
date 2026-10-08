@@ -1,2 +1,12 @@
 /documentation
 atlas_ai_core_docs.zip
+
+# Environment configuration
+.env
+
+# Python & uv virtual environment
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+

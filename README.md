@@ -455,6 +455,8 @@ The `docs/` directory contains the project's technical source of truth.
   [`DECISIONS.md`](docs/DECISIONS.md)                 Important architecture decisions
 
   [`DEVELOPMENT_PLAN.md`](docs/DEVELOPMENT_PLAN.md)   P0 implementation phases
+
+  [`DEVELOPMENT_SETUP.md`](docs/DEVELOPMENT_SETUP.md) Local Docker Compose development setup
   ---------------------------------------------------------------------------------------
 
 ------------------------------------------------------------------------
