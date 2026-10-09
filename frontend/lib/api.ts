@@ -6,6 +6,7 @@ import type {
   RepositoryAnalysisRequest,
   RepositoryAnalysisResponse,
   RepositoryGraphResponse,
+  RepositoryImpactResponse,
 } from "./types.ts";
 
 /**
@@ -331,5 +332,141 @@ export async function getRepositoryGraph(
   }
 
   return data as RepositoryGraphResponse;
+}
+
+/**
+ * Retrieves the direct and transitive impact analysis for a repository entity.
+ * Calls GET /api/v1/repositories/{repository_id}/impact/{entity_id}.
+ *
+ * @param repositoryId Unique identifier of the repository.
+ * @param entityId Unique identifier of the target entity.
+ * @param options Optional parameters (maxDepth, signal for cancellation).
+ * @returns Promise resolving to the validated RepositoryImpactResponse.
+ * @throws ApiClientError on HTTP errors, missing parameters, or network disruption.
+ */
+export async function getRepositoryImpact(
+  repositoryId: string,
+  entityId: string,
+  options?: { maxDepth?: number; signal?: AbortSignal }
+): Promise<RepositoryImpactResponse> {
+  const cleanRepoId = repositoryId ? repositoryId.trim() : "";
+  const cleanEntityId = entityId ? entityId.trim() : "";
+
+  if (!cleanRepoId) {
+    throw new ApiClientError(
+      "Repository identifier is required to analyze entity impact.",
+      400,
+      undefined,
+      "INVALID_ID"
+    );
+  }
+
+  if (!cleanEntityId) {
+    throw new ApiClientError(
+      "Entity identifier is required to analyze entity impact.",
+      400,
+      undefined,
+      "INVALID_ID"
+    );
+  }
+
+  const baseUrl = getApiBaseUrl();
+  const maxDepth = options?.maxDepth;
+  const queryParam = maxDepth && maxDepth >= 1 ? `?max_depth=${encodeURIComponent(maxDepth)}` : "";
+  const endpoint = `${baseUrl}/api/v1/repositories/${encodeURIComponent(cleanRepoId)}/impact/${encodeURIComponent(cleanEntityId)}${queryParam}`;
+
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+      },
+      signal: options?.signal,
+    });
+  } catch (err: unknown) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new ApiClientError("Impact analysis request was cancelled", 0, undefined, "ABORTED");
+    }
+    const originalMessage = err instanceof Error ? err.message : String(err);
+    throw new ApiClientError(
+      "Unable to reach backend service to retrieve impact analysis.",
+      0,
+      originalMessage,
+      "NETWORK_ERROR"
+    );
+  }
+
+  if (!response.ok) {
+    let errorDetail: string | null = null;
+    try {
+      const errJson = await response.json();
+      errorDetail = parseErrorDetail(errJson);
+    } catch {
+      // Body was not JSON
+    }
+
+    if (errorDetail) {
+      throw new ApiClientError(errorDetail, response.status, errorDetail);
+    }
+
+    switch (response.status) {
+      case 400:
+        throw new ApiClientError(
+          `Invalid impact request parameters for entity '${cleanEntityId}'.`,
+          400
+        );
+      case 404:
+        throw new ApiClientError(
+          `Entity '${cleanEntityId}' or repository '${cleanRepoId}' was not found.`,
+          404
+        );
+      case 503:
+        throw new ApiClientError(
+          "Graph database service unavailable during impact analysis.",
+          503
+        );
+      case 500:
+      default:
+        throw new ApiClientError(
+          `Impact analysis failed with server error (${response.status}). Please try again.`,
+          response.status
+        );
+    }
+  }
+
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch {
+    throw new ApiClientError(
+      "Received malformed response data from the impact analysis service.",
+      response.status,
+      undefined,
+      "INVALID_RESPONSE"
+    );
+  }
+
+  if (
+    !data ||
+    typeof data !== "object" ||
+    !("entity" in data) ||
+    !("direct_dependents" in data) ||
+    !("transitive_dependents" in data) ||
+    !("affected_files" in data) ||
+    !("max_depth" in data) ||
+    !Array.isArray((data as Record<string, unknown>).direct_dependents) ||
+    !Array.isArray((data as Record<string, unknown>).transitive_dependents) ||
+    !Array.isArray((data as Record<string, unknown>).affected_files)
+  ) {
+    throw new ApiClientError(
+      "Received incomplete impact data from the service: Missing required fields.",
+      response.status,
+      undefined,
+      "INVALID_RESPONSE"
+    );
+  }
+
+  return data as RepositoryImpactResponse;
 }
 

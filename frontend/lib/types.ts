@@ -68,3 +68,43 @@ export interface RepositoryGraphResponse {
 }
 
 export type GraphFetchStatus = "idle" | "loading" | "success" | "empty" | "error";
+
+/**
+ * Target entity model whose impact was analyzed (P0-20, P0-23).
+ */
+export interface TargetEntityModel {
+  id: string;
+  name: string;
+  label?: string | null;
+  type?: string | null;
+  file_path?: string | null;
+  properties?: Record<string, unknown>;
+}
+
+/**
+ * Impacted entity model affected directly or transitively (P0-20, P0-23).
+ */
+export interface ImpactedEntityModel {
+  id: string;
+  name: string;
+  depth: number;
+  label?: string | null;
+  type?: string | null;
+  file_path?: string | null;
+  entity_id?: string | null;
+  properties?: Record<string, unknown>;
+}
+
+/**
+ * Response payload for GET /api/v1/repositories/{repository_id}/impact/{entity_id}.
+ */
+export interface RepositoryImpactResponse {
+  entity: TargetEntityModel;
+  direct_dependents: ImpactedEntityModel[];
+  transitive_dependents: ImpactedEntityModel[];
+  affected_files: string[];
+  max_depth: number;
+  repository_id?: string | null;
+}
+
+export type ImpactFetchStatus = "idle" | "loading" | "success" | "empty" | "error";
