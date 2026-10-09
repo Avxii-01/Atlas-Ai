@@ -18,16 +18,22 @@ from app.db.relationship_persister import (
     Neo4jRelationshipPersistenceError,
     persist_relationships,
     relationship_to_properties,
+    repo_id_from_entity_id,
 )
 from app.db.schema import init_schema
+from app.graph.impact import ImpactAnalysisError, ImpactAnalyzer
+from app.graph.traversal import GraphTraversalError, TraversalNode, validate_depth
 from app.resolver import resolve_repository
 from app.schemas.repository import (
     AnalysisSummary,
+    ImpactedEntityModel,
     NodeModel,
     RelationshipModel,
     RepositoryAnalysisRequest,
     RepositoryAnalysisResponse,
     RepositoryGraphResponse,
+    RepositoryImpactResponse,
+    TargetEntityModel,
 )
 from app.ucm.model import UnifiedCodeModel
 
@@ -140,6 +146,110 @@ def validate_repository_id(repo_id: str) -> str:
         raise HTTPException(status_code=400, detail="Repository ID exceeds maximum permitted length")
 
     return clean_id
+
+
+def validate_entity_id(entity_id: str) -> str:
+    """Validate and sanitize an entity identifier.
+
+    Args:
+        entity_id: Entity ID string from path parameter.
+
+    Returns:
+        Sanitized entity ID.
+
+    Raises:
+        HTTPException: 400 Bad Request if entity_id is empty, pure whitespace, or malformed.
+    """
+    if not isinstance(entity_id, str) or not entity_id.strip():
+        raise HTTPException(status_code=400, detail="Entity ID cannot be empty")
+
+    clean_id = entity_id.strip()
+
+    if "\0" in clean_id or "../" in clean_id or "..\\" in clean_id:
+        raise HTTPException(status_code=400, detail="Invalid entity ID format")
+
+    if len(clean_id) > 1000:
+        raise HTTPException(status_code=400, detail="Entity ID exceeds maximum permitted length")
+
+    return clean_id
+
+
+def entity_to_target_model(entity: Any, fallback_id: str) -> TargetEntityModel:
+    """Convert a retrieved UCM entity or node to TargetEntityModel."""
+    if isinstance(entity, TargetEntityModel):
+        return entity
+    entity_id = getattr(entity, "id", None) or fallback_id
+    name = (
+        getattr(entity, "name", None)
+        or getattr(entity, "path", None)
+        or getattr(entity, "imported_name", None)
+        or entity_id
+    )
+    cls_name = (
+        entity.__class__.__name__
+        if hasattr(entity, "__class__") and entity.__class__.__name__ not in ("dict", "object")
+        else None
+    )
+    file_path = getattr(entity, "file_path", None) or getattr(entity, "path", None)
+    props: dict[str, Any] = {}
+    if hasattr(entity, "to_dict"):
+        props = entity.to_dict()
+    elif isinstance(entity, dict):
+        props = dict(entity)
+
+    return TargetEntityModel(
+        id=str(entity_id),
+        name=str(name),
+        label=cls_name,
+        type=cls_name,
+        file_path=str(file_path) if file_path else None,
+        properties=props,
+    )
+
+
+def traversal_node_to_impacted_model(node: TraversalNode) -> ImpactedEntityModel:
+    """Convert a TraversalNode to ImpactedEntityModel."""
+    entity_id = node.entity_id
+    primary_label = (
+        node.primary_label
+        if hasattr(node, "primary_label")
+        else (node.labels[0] if node.labels else None)
+    )
+
+    name: str | None = None
+    if node.entity is not None:
+        name = (
+            getattr(node.entity, "name", None)
+            or getattr(node.entity, "path", None)
+            or getattr(node.entity, "imported_name", None)
+        )
+    if not name and "name" in node.properties:
+        name = str(node.properties["name"])
+    if not name and "path" in node.properties:
+        name = str(node.properties["path"])
+    if not name and "imported_name" in node.properties:
+        name = str(node.properties["imported_name"])
+    if not name:
+        name = entity_id
+
+    file_path: str | None = None
+    if "file_path" in node.properties and node.properties["file_path"]:
+        file_path = str(node.properties["file_path"])
+    elif "path" in node.properties and node.properties["path"]:
+        file_path = str(node.properties["path"])
+    elif node.entity is not None:
+        file_path = getattr(node.entity, "file_path", None) or getattr(node.entity, "path", None)
+
+    return ImpactedEntityModel(
+        id=entity_id,
+        name=name,
+        depth=node.depth,
+        label=primary_label,
+        type=primary_label,
+        file_path=file_path,
+        entity_id=entity_id,
+        properties=dict(node.properties),
+    )
 
 
 def serialize_ucm_graph(
@@ -546,3 +656,159 @@ class RepositoryService:
             nodes=nodes,
             relationships=relationships,
         )
+
+    def analyze_impact(
+        self,
+        repository_id: str,
+        entity_id: str,
+        max_depth: int = 10,
+        session: Session | None = None,
+    ) -> RepositoryImpactResponse:
+        """Analyze the direct and transitive impact radius of an entity in a repository.
+
+        Args:
+            repository_id: Repository identifier scoping the analysis.
+            entity_id: Identifier of target entity being analyzed.
+            max_depth: Maximum traversal depth limit (>= 1, default 10).
+            session: Optional caller-managed Neo4j Session for testing.
+
+        Returns:
+            RepositoryImpactResponse matching docs/API.md contract.
+
+        Raises:
+            HTTPException:
+                400: If repository_id or entity_id is malformed or invalid.
+                404: If repository or entity is not found in Neo4j.
+                503: If Neo4j database is unreachable.
+                500: If analysis fails with an internal error.
+        """
+        clean_repo_id = validate_repository_id(repository_id)
+        clean_entity_id = validate_entity_id(entity_id)
+
+        try:
+            depth_int = validate_depth(max_depth)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        # Check explicit repo ID prefix mismatch if present
+        target_entity_repo_id = repo_id_from_entity_id(clean_entity_id)
+        if target_entity_repo_id is not None and target_entity_repo_id != clean_repo_id:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Entity '{clean_entity_id}' not found in repository '{clean_repo_id}'",
+            )
+
+        # Acquire database driver if session is not explicitly provided
+        active_driver = self.driver
+        if active_driver is None and session is None:
+            try:
+                active_driver = self._get_driver()
+            except Neo4jConnectionError:
+                raise HTTPException(status_code=503, detail="Database service unavailable") from None
+
+        retriever = GraphRetriever(driver=active_driver)
+        analyzer = ImpactAnalyzer(driver=active_driver)
+
+        # Acquire session if not supplied
+        sess_context = None
+        if session is not None:
+            sess = session
+        else:
+            try:
+                sess_context = active_driver.session()
+                sess = sess_context.__enter__()
+            except Neo4jConnectionError:
+                raise HTTPException(status_code=503, detail="Database service unavailable") from None
+            except Exception as exc:
+                logger.error("Failed to acquire Neo4j session: %s", type(exc).__name__)
+                raise HTTPException(status_code=503, detail="Database service unavailable") from None
+
+        try:
+            # 1. Verify repository exists
+            try:
+                repo = retriever.get_repository(clean_repo_id, session=sess)
+            except Neo4jConnectionError:
+                raise HTTPException(status_code=503, detail="Database service unavailable") from None
+            except Exception as exc:
+                logger.error("Error retrieving repository '%s': %s", clean_repo_id, type(exc).__name__)
+                raise HTTPException(status_code=500, detail="Failed to retrieve repository") from None
+
+            if repo is None:
+                raise HTTPException(status_code=404, detail=f"Repository '{clean_repo_id}' not found")
+
+            # 2. Verify target entity exists in repository
+            try:
+                target_entity = retriever.get_entity_by_id(
+                    clean_entity_id,
+                    repo_id=clean_repo_id,
+                    session=sess,
+                )
+            except Neo4jConnectionError:
+                raise HTTPException(status_code=503, detail="Database service unavailable") from None
+            except Exception as exc:
+                logger.error("Error retrieving entity '%s': %s", clean_entity_id, type(exc).__name__)
+                raise HTTPException(status_code=500, detail="Failed to retrieve entity") from None
+
+            if target_entity is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Entity '{clean_entity_id}' not found in repository '{clean_repo_id}'",
+                )
+
+            # 3. Execute impact analysis
+            try:
+                impact_result = analyzer.analyze_impact(
+                    target_entity_id=clean_entity_id,
+                    repo_id=clean_repo_id,
+                    max_depth=depth_int,
+                    session=sess,
+                )
+            except ImpactAnalysisError:
+                raise HTTPException(status_code=500, detail="Failed to analyze impact") from None
+            except Neo4jConnectionError:
+                raise HTTPException(status_code=503, detail="Database service unavailable") from None
+            except Exception as exc:
+                logger.error("Unexpected error analyzing impact for '%s': %s", clean_entity_id, type(exc).__name__)
+                raise HTTPException(status_code=500, detail="Failed to analyze impact") from None
+
+            if not impact_result.target_entity_found:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Entity '{clean_entity_id}' not found in repository '{clean_repo_id}'",
+                )
+
+            # 4. Serialize target entity
+            target_model = entity_to_target_model(target_entity, fallback_id=clean_entity_id)
+
+            # 5. Partition direct impact (depth == 1) vs transitive impact (depth > 1)
+            direct_models = [
+                traversal_node_to_impacted_model(node)
+                for node in impact_result.directly_impacted_entities
+            ]
+            transitive_models = [
+                traversal_node_to_impacted_model(node)
+                for node in impact_result.impacted_entities
+                if node.depth > 1
+            ]
+
+            # Enforce deterministic ordering: depth ASC, then id ASC
+            direct_models.sort(key=lambda d: (d.depth, d.id))
+            transitive_models.sort(key=lambda d: (d.depth, d.id))
+
+            # 6. Extract affected files deterministically
+            affected_file_paths = list(impact_result.affected_file_paths)
+
+            return RepositoryImpactResponse(
+                entity=target_model,
+                direct_dependents=direct_models,
+                transitive_dependents=transitive_models,
+                affected_files=affected_file_paths,
+                max_depth=depth_int,
+                repository_id=clean_repo_id,
+            )
+        finally:
+            if sess_context is not None:
+                try:
+                    sess_context.__exit__(None, None, None)
+                except Exception:
+                    pass
