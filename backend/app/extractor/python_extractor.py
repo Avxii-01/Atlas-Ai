@@ -592,7 +592,10 @@ class PythonExtractor:
         ucm = UnifiedCodeModel(repository=repo_ent)
 
         if file_paths is not None:
-            target_files = [Path(fp) for fp in file_paths]
+            target_files = [
+                Path(fp).resolve() if Path(fp).is_absolute() else (root_path / fp).resolve()
+                for fp in file_paths
+            ]
         else:
             # Deterministic discovery of Python files excluding common non-source directories
             ignored_dirs = {".git", ".venv", "venv", "__pycache__", "node_modules", ".pytest_cache", ".ruff_cache"}

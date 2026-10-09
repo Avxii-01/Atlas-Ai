@@ -489,9 +489,15 @@ def resolve_repository(
     repo_path: str | Path,
     repo_name: str | None = None,
     repo_source: str | None = None,
+    file_paths: list[str | Path] | None = None,
 ) -> UnifiedCodeModel:
     """Convenience function to extract and resolve relationships for an entire repository."""
     from app.extractor import extract_python_repository
 
-    ucm = extract_python_repository(repo_path, repo_name=repo_name, repo_source=repo_source)
+    ucm = extract_python_repository(
+        repo_path,
+        repo_name=repo_name,
+        repo_source=repo_source,
+        file_paths=file_paths,
+    )
     return resolve_relationships(ucm, repo_path=repo_path)
