@@ -30,3 +30,41 @@ export interface AnalysisError {
   status?: number;
   detail?: string;
 }
+
+/**
+ * Graph node representation aligned with GET /api/v1/repositories/{id}/graph (P0-19).
+ */
+export interface GraphNodeModel {
+  id: string;
+  label: string; // Repository, File, Module, Class, Function, Method, Import
+  name: string;
+  type: string;
+  display_name?: string | null;
+  properties?: Record<string, unknown>;
+}
+
+/**
+ * Graph relationship edge representation aligned with GET /api/v1/repositories/{id}/graph (P0-19).
+ */
+export interface GraphRelationshipModel {
+  id: string;
+  source: string;
+  target: string;
+  type: string; // CONTAINS, IMPORTS, CALLS, INHERITS
+  source_id?: string | null;
+  target_id?: string | null;
+  rel_type?: string | null;
+  properties?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * API response contract for GET /api/v1/repositories/{repository_id}/graph.
+ */
+export interface RepositoryGraphResponse {
+  repository_id: string;
+  nodes: GraphNodeModel[];
+  relationships: GraphRelationshipModel[];
+}
+
+export type GraphFetchStatus = "idle" | "loading" | "success" | "empty" | "error";

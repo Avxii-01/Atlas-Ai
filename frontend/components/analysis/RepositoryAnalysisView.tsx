@@ -14,11 +14,13 @@ import AnalysisErrorAlert from "./AnalysisErrorAlert";
 export interface RepositoryAnalysisViewProps {
   initialPath?: string;
   onAnalyze?: (request: RepositoryAnalysisRequest) => Promise<RepositoryAnalysisResponse>;
+  onViewGraph?: (repositoryId: string) => void;
 }
 
 export default function RepositoryAnalysisView({
   initialPath = "",
   onAnalyze = analyzeRepository,
+  onViewGraph,
 }: RepositoryAnalysisViewProps) {
   const [path, setPath] = useState<string>(initialPath);
   const [name, setName] = useState<string>("");
@@ -146,7 +148,11 @@ export default function RepositoryAnalysisView({
         {/* Success State */}
         {status === "success" && result && (
           <div className="view-result-slot">
-            <AnalysisResultCard result={result} onReset={handleReset} />
+            <AnalysisResultCard
+              result={result}
+              onReset={handleReset}
+              onViewGraph={onViewGraph}
+            />
           </div>
         )}
       </div>

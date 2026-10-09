@@ -2,7 +2,11 @@
  * API client module for Atlas AI repository analysis (P0-18, P0-21).
  */
 
-import type { RepositoryAnalysisRequest, RepositoryAnalysisResponse } from "./types.ts";
+import type {
+  RepositoryAnalysisRequest,
+  RepositoryAnalysisResponse,
+  RepositoryGraphResponse,
+} from "./types.ts";
 
 /**
  * Returns the configured base API URL, or empty string for relative paths.
@@ -212,5 +216,120 @@ export async function analyzeRepository(
   }
 
   return data as RepositoryAnalysisResponse;
+}
+
+/**
+ * Retrieves the code knowledge graph for a repository from GET /api/v1/repositories/{id}/graph.
+ *
+ * @param repositoryId Unique identifier of the repository.
+ * @param limit Optional maximum number of nodes to return.
+ * @returns Promise resolving to the validated RepositoryGraphResponse.
+ * @throws ApiClientError on HTTP errors, missing parameters, or network disruption.
+ */
+export async function getRepositoryGraph(
+  repositoryId: string,
+  limit?: number
+): Promise<RepositoryGraphResponse> {
+  const cleanId = repositoryId ? repositoryId.trim() : "";
+
+  if (!cleanId) {
+    throw new ApiClientError(
+      "Repository identifier is required to retrieve the graph.",
+      400,
+      undefined,
+      "INVALID_ID"
+    );
+  }
+
+  const baseUrl = getApiBaseUrl();
+  const queryParam = limit && limit > 0 ? `?limit=${encodeURIComponent(limit)}` : "";
+  const endpoint = `${baseUrl}/api/v1/repositories/${encodeURIComponent(cleanId)}/graph${queryParam}`;
+
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+      },
+    });
+  } catch (err: unknown) {
+    const originalMessage = err instanceof Error ? err.message : String(err);
+    throw new ApiClientError(
+      "Unable to reach backend service to retrieve repository graph.",
+      0,
+      originalMessage,
+      "NETWORK_ERROR"
+    );
+  }
+
+  if (!response.ok) {
+    let errorDetail: string | null = null;
+    try {
+      const errJson = await response.json();
+      errorDetail = parseErrorDetail(errJson);
+    } catch {
+      // Body was not JSON
+    }
+
+    if (errorDetail) {
+      throw new ApiClientError(errorDetail, response.status, errorDetail);
+    }
+
+    switch (response.status) {
+      case 400:
+        throw new ApiClientError(
+          `Invalid repository identifier: '${cleanId}'.`,
+          400
+        );
+      case 404:
+        throw new ApiClientError(
+          `Repository '${cleanId}' was not found in the graph database.`,
+          404
+        );
+      case 503:
+        throw new ApiClientError(
+          "Graph database service unavailable. Please check the Neo4j database status.",
+          503
+        );
+      case 500:
+      default:
+        throw new ApiClientError(
+          `Failed to retrieve graph with server error (${response.status}). Please try again.`,
+          response.status
+        );
+    }
+  }
+
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch {
+    throw new ApiClientError(
+      "Received malformed response data from the graph service.",
+      response.status,
+      undefined,
+      "INVALID_RESPONSE"
+    );
+  }
+
+  if (
+    !data ||
+    typeof data !== "object" ||
+    !("repository_id" in data) ||
+    !("nodes" in data) ||
+    !("relationships" in data) ||
+    !Array.isArray((data as Record<string, unknown>).nodes) ||
+    !Array.isArray((data as Record<string, unknown>).relationships)
+  ) {
+    throw new ApiClientError(
+      "Received incomplete graph data from the service: Missing required fields (repository_id, nodes, relationships).",
+      response.status,
+      undefined,
+      "INVALID_RESPONSE"
+    );
+  }
+
+  return data as RepositoryGraphResponse;
 }
 
