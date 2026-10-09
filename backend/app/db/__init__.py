@@ -17,6 +17,14 @@ from app.db.neo4j import (
     set_driver,
     verify_connectivity,
 )
+from app.db.relationship_persister import (
+    Neo4jRelationshipPersistenceError,
+    RelationshipPersistenceResult,
+    RelationshipPersister,
+    get_relationship_merge_cypher,
+    persist_relationships,
+    relationship_to_properties,
+)
 from app.db.schema import (
     NODE_SCHEMAS,
     P0_CONSTRAINTS,
@@ -44,6 +52,7 @@ __all__ = [
     "NODE_SCHEMAS",
     "Neo4jConnectionError",
     "Neo4jPersistenceError",
+    "Neo4jRelationshipPersistenceError",
     "Neo4jSchemaError",
     "NodeLabel",
     "NodePropertySchema",
@@ -51,6 +60,8 @@ __all__ = [
     "P0_INDEXES",
     "RELATIONSHIP_PATTERNS",
     "RelationshipPatternSchema",
+    "RelationshipPersistenceResult",
+    "RelationshipPersister",
     "close_driver",
     "entity_to_properties",
     "get_all_schema_statements",
@@ -59,11 +70,14 @@ __all__ = [
     "get_entity_merge_cypher",
     "get_index_statements",
     "get_neo4j_session",
+    "get_relationship_merge_cypher",
     "get_schema_constraints",
     "get_schema_indexes",
     "init_driver",
     "init_schema",
     "persist_entities",
+    "persist_relationships",
+    "relationship_to_properties",
     "set_driver",
     "verify_connectivity",
 ]
