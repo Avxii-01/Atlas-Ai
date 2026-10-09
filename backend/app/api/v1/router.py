@@ -2,9 +2,9 @@
 
 from fastapi import APIRouter
 
+from app.api.v1.repositories import router as repositories_router
+
 api_router = APIRouter()
 
-# Future P0 routers will be registered here:
-# - P0-18: /repositories/analyze
-# - P0-19: /repositories/{repository_id}/graph
-# - P0-20: /repositories/{repository_id}/impact/{entity_id}
+# Register repositories router
+api_router.include_router(repositories_router, prefix="/repositories", tags=["repositories"])
