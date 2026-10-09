@@ -5,6 +5,7 @@ from app.services.repository_service import (
     ensure_schema_initialized,
     reset_schema_initialization_flag,
     serialize_ucm_graph,
+    validate_entity_id,
     validate_repository_id,
     validate_repository_path,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "ensure_schema_initialized",
     "reset_schema_initialization_flag",
     "serialize_ucm_graph",
+    "validate_entity_id",
     "validate_repository_id",
     "validate_repository_path",
 ]

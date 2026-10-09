@@ -153,54 +153,59 @@ Affected files are derived from the impacted entities:
 
 ## 6. Exposure Through P0-20 Impact REST API
 
-P0-20 can expose the engine directly via FastAPI:
+The impact engine is exposed through the FastAPI route in `backend/app/api/v1/repositories.py`:
 
-```python
-from fastapi import APIRouter, Depends, HTTPException, Query
-from app.graph.impact import ImpactAnalysisResult, ImpactAnalyzer, analyze_impact
-
-router = APIRouter(prefix="/api/v1/impact", tags=["impact"])
-
-@router.get("/{entity_id:path}")
-def get_entity_impact(
-    entity_id: str,
-    repo_id: str | None = Query(default=None),
-    max_depth: int = Query(default=10, ge=1, le=50),
-) -> dict:
-    try:
-        result = analyze_impact(
-            target_entity_id=entity_id,
-            repo_id=repo_id,
-            max_depth=max_depth,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    if not result.target_entity_found:
-        raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
-
-    return {
-        "repository_id": result.repository_id,
-        "target_entity_id": result.target_entity_id,
-        "blast_radius": result.blast_radius,
-        "directly_impacted_count": result.directly_impacted_count,
-        "affected_file_count": result.affected_file_count,
-        "directly_impacted_entities": result.directly_impacted_entity_ids,
-        "impacted_entities": [
-            {
-                "entity_id": n.entity_id,
-                "depth": n.depth,
-                "label": n.primary_label,
-                "path_relationships": list(n.path_relationship_types),
-            }
-            for n in result.impacted_entities
-        ],
-        "affected_files": [
-            {"file_id": f.file_id, "path": f.path}
-            for f in result.affected_files
-        ],
-    }
+```http
+GET /api/v1/repositories/{repository_id}/impact/{entity_id}
 ```
+
+Optional query parameters:
+- `max_depth: int` (default: 10, minimum: 1).
+
+### Response Schema (`RepositoryImpactResponse`):
+```json
+{
+  "entity": {
+    "id": "repo::atlas_fixture::function::utils.format_identifier",
+    "name": "format_identifier",
+    "label": "Function",
+    "type": "Function",
+    "file_path": "utils.py",
+    "properties": {}
+  },
+  "direct_dependents": [
+    {
+      "id": "repo::atlas_fixture::method::services.ItemService.create_tagged_item",
+      "name": "create_tagged_item",
+      "depth": 1,
+      "label": "Method",
+      "type": "Method",
+      "file_path": "services.py",
+      "entity_id": "repo::atlas_fixture::method::services.ItemService.create_tagged_item",
+      "properties": {}
+    }
+  ],
+  "transitive_dependents": [
+    {
+      "id": "repo::atlas_fixture::function::services.process_item_workflow",
+      "name": "process_item_workflow",
+      "depth": 2,
+      "label": "Function",
+      "type": "Function",
+      "file_path": "services.py",
+      "entity_id": "repo::atlas_fixture::function::services.process_item_workflow",
+      "properties": {}
+    }
+  ],
+  "affected_files": [
+    "app.py",
+    "services.py"
+  ],
+  "max_depth": 10,
+  "repository_id": "repo::atlas_fixture"
+}
+```
+
 
 ---
 

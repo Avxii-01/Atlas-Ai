@@ -91,3 +91,65 @@ class RepositoryGraphResponse(BaseModel):
     repository_id: str = Field(..., description="Deterministic repository identifier")
     nodes: list[NodeModel] = Field(default_factory=list, description="List of graph nodes")
     relationships: list[RelationshipModel] = Field(default_factory=list, description="List of graph relationship edges")
+
+
+class TargetEntityModel(BaseModel):
+    """Target entity model whose impact is analyzed."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(..., description="Stable unique identifier of the target entity")
+    name: str = Field(..., description="Name or identifier of the target entity")
+    label: str | None = Field(default=None, description="Entity label/kind (e.g. Function, Class)")
+    type: str | None = Field(default=None, description="Entity type alias matching label")
+    file_path: str | None = Field(default=None, description="Source file path containing entity")
+    properties: dict[str, Any] = Field(default_factory=dict, description="Entity attributes")
+
+
+class ImpactedEntityModel(BaseModel):
+    """Entity affected directly or transitively by modifications to target entity."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(..., description="Stable unique identifier of the impacted entity")
+    name: str = Field(..., description="Name or identifier of the impacted entity")
+    depth: int = Field(..., description="Shortest-path traversal distance (hop count) from target")
+    label: str | None = Field(default=None, description="Entity label/kind (e.g. Function, Class, Method)")
+    type: str | None = Field(default=None, description="Entity type alias matching label")
+    file_path: str | None = Field(default=None, description="Source file path containing entity")
+    entity_id: str | None = Field(default=None, description="Alias matching id")
+    properties: dict[str, Any] = Field(default_factory=dict, description="Entity attributes")
+
+
+class AffectedFileModel(BaseModel):
+    """Structured representation of a source file containing impacted entities."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    file_id: str = Field(..., description="Deterministic File entity identifier")
+    path: str = Field(..., description="Normalized repository-relative file path")
+
+
+class RepositoryImpactResponse(BaseModel):
+    """Response payload for GET /api/v1/repositories/{repository_id}/impact/{entity_id}."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    entity: TargetEntityModel = Field(..., description="Target code entity whose impact was analyzed")
+    direct_dependents: list[ImpactedEntityModel] = Field(
+        default_factory=list,
+        description="Entities directly dependent on target entity (hop depth == 1)",
+    )
+    transitive_dependents: list[ImpactedEntityModel] = Field(
+        default_factory=list,
+        description="Entities transitively dependent on target entity (hop depth > 1)",
+    )
+    affected_files: list[str] = Field(
+        default_factory=list,
+        description="Deduplicated repository-relative file paths containing impacted entities, sorted deterministically",
+    )
+    max_depth: int = Field(..., description="Maximum traversal depth applied during analysis")
+    repository_id: str | None = Field(
+        default=None,
+        description="Repository identifier scoping the impact analysis",
+    )
