@@ -379,9 +379,14 @@ class RelationshipPersister:
                         cypher = get_relationship_merge_cypher(rel_type_str, src_lbl, tgt_lbl)
                         res = tx.run(cypher, repo_id=repo_id, batch=batch)
                         record = res.single() if hasattr(res, "single") else None
+                        persisted_val = (
+                            record.get("persisted_count")
+                            if (record and hasattr(record, "get"))
+                            else None
+                        )
                         persisted = (
-                            record["persisted_count"]
-                            if record and "persisted_count" in record
+                            int(persisted_val)
+                            if isinstance(persisted_val, (int, float))
                             else len(batch)
                         )
                         persisted_counts[rel_type_str] += persisted
@@ -396,9 +401,14 @@ class RelationshipPersister:
                     cypher = get_relationship_merge_cypher(rel_type_str, src_lbl, tgt_lbl)
                     res = session.run(cypher, repo_id=repo_id, batch=batch)
                     record = res.single() if hasattr(res, "single") else None
+                    persisted_val = (
+                        record.get("persisted_count")
+                        if (record and hasattr(record, "get"))
+                        else None
+                    )
                     persisted = (
-                        record["persisted_count"]
-                        if record and "persisted_count" in record
+                        int(persisted_val)
+                        if isinstance(persisted_val, (int, float))
                         else len(batch)
                     )
                     persisted_counts[rel_type_str] += persisted

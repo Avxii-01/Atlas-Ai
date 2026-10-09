@@ -142,7 +142,7 @@ class GraphRetriever:
         try:
             cypher = "MATCH (r:Repository {id: $repo_id})\nRETURN properties(r) AS props"
             res = sess.run(cypher, repo_id=repo_id).single()
-            if res and "props" in res:
+            if res and res.get("props") is not None:
                 return record_to_entity(NodeLabel.REPOSITORY.value, res["props"])
             return None
         except Neo4jRetrievalError:
@@ -177,7 +177,7 @@ class GraphRetriever:
                     f"RETURN properties(n) AS props"
                 )
                 res = sess.run(cypher, entity_id=entity_id, repo_id=repo_id).single()
-                if res and "props" in res:
+                if res and res.get("props") is not None:
                     return record_to_entity(expected_label, res["props"])
                 return None
 
@@ -187,7 +187,7 @@ class GraphRetriever:
                 "RETURN properties(n) AS props, labels(n) AS labels"
             )
             res = sess.run(cypher, entity_id=entity_id, repo_id=repo_id).single()
-            if res and "props" in res and "labels" in res:
+            if res and res.get("props") is not None and res.get("labels") is not None:
                 labels = res["labels"]
                 primary_label = next((lbl for lbl in labels if lbl in ENTITY_FACTORIES), None)
                 if primary_label:
@@ -213,7 +213,7 @@ class GraphRetriever:
         result = session.run(cypher, repo_id=repo_id)
         entities = []
         for record in result:
-            if "props" in record:
+            if record and record.get("props") is not None:
                 entities.append(record_to_entity(label.value, record["props"]))
         return entities
 
