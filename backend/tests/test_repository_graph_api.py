@@ -16,7 +16,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
-from neo4j import Driver, Session
+from neo4j import Driver, Record, Session
 
 from app.db.graph_retriever import GraphRetriever, Neo4jRetrievalError
 from app.db.neo4j import Neo4jConnectionError, set_driver
@@ -539,4 +539,89 @@ def test_neo4j_driver_uninitialized_returns_503():
     response = client.get("/api/v1/repositories/repo::demo/graph")
     assert response.status_code == 503
     assert response.json()["detail"] == "Database service unavailable"
+
+
+def test_get_repository_graph_endpoint_with_neo4j_records(
+    resolved_fixture_ucm: UnifiedCodeModel,
+):
+    """Regression test: verify API returns HTTP 200 with 53 nodes and 58 relationships
+    when Neo4j driver returns neo4j.Record instances where ('props' in record) is False.
+    """
+    repo_id = resolved_fixture_ucm.repository.id
+
+    repo_rec = Record([("props", resolved_fixture_ucm.repository.to_dict())])
+    file_recs = [Record([("props", f.to_dict())]) for f in resolved_fixture_ucm.files]
+    module_recs = [Record([("props", m.to_dict())]) for m in resolved_fixture_ucm.modules]
+    class_recs = [Record([("props", c.to_dict())]) for c in resolved_fixture_ucm.classes]
+    func_recs = [Record([("props", fn.to_dict())]) for fn in resolved_fixture_ucm.functions]
+    meth_recs = [Record([("props", mt.to_dict())]) for mt in resolved_fixture_ucm.methods]
+    import_recs = [Record([("props", im.to_dict())]) for im in resolved_fixture_ucm.imports]
+
+    rel_recs = []
+    for r in resolved_fixture_ucm.relationships:
+        props = {}
+        if r.location:
+            props.update(
+                {
+                    "start_line": r.location.start_point.line,
+                    "start_column": r.location.start_point.column,
+                    "end_line": r.location.end_point.line,
+                    "end_column": r.location.end_point.column,
+                    "start_byte": r.location.start_byte,
+                    "end_byte": r.location.end_byte,
+                }
+            )
+        props.update(r.metadata)
+        rel_recs.append(
+            Record(
+                [
+                    ("source_id", r.source_id),
+                    ("target_id", r.target_id),
+                    ("rel_type", r.rel_type.value),
+                    ("properties", props),
+                ]
+            )
+        )
+
+    mock_session = MagicMock(spec=Session)
+
+    def mock_run(query: str, **kwargs):
+        res = MagicMock()
+        if "MATCH (r:Repository" in query:
+            res.single.return_value = repo_rec
+        elif "MATCH (n:File" in query:
+            res.__iter__.return_value = file_recs
+        elif "MATCH (n:Module" in query:
+            res.__iter__.return_value = module_recs
+        elif "MATCH (n:Class" in query:
+            res.__iter__.return_value = class_recs
+        elif "MATCH (n:Function" in query:
+            res.__iter__.return_value = func_recs
+        elif "MATCH (n:Method" in query:
+            res.__iter__.return_value = meth_recs
+        elif "MATCH (n:Import" in query:
+            res.__iter__.return_value = import_recs
+        elif "MATCH (src)-[r]->(tgt)" in query:
+            res.__iter__.return_value = rel_recs
+        else:
+            res.__iter__.return_value = []
+            res.single.return_value = None
+        return res
+
+    mock_session.run.side_effect = mock_run
+
+    mock_driver = MagicMock(spec=Driver)
+    mock_driver.session.return_value = mock_session
+    set_driver(mock_driver)
+
+    client = TestClient(app, raise_server_exceptions=False)
+    # Test URL encoded repo ID
+    response = client.get(f"/api/v1/repositories/repo%3A%3Aatlas_fixture/graph")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["repository_id"] == "repo::atlas_fixture"
+    assert len(data["nodes"]) == 53
+    assert len(data["relationships"]) == 58
+
 

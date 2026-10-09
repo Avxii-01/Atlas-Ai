@@ -3,7 +3,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 import pytest
-from neo4j import Driver, Session
+from neo4j import Driver, Record, Session
 
 from app.db.graph_retriever import (
     GraphRetriever,
@@ -537,3 +537,147 @@ def test_reconstruct_atlas_fixture_graph_from_simulated_records():
     assert rel_counts[RelationshipType.IMPORTS] == 5
     assert rel_counts[RelationshipType.CALLS] == 15
     assert rel_counts[RelationshipType.INHERITS] == 1
+
+
+def test_neo4j_record_membership_check_discrepancy_and_resolution():
+    """Verify the root cause discrepancy: neo4j.Record inherits from tuple, so 'key in record'
+    checks tuple elements (values) and returns False, while record.get('key') succeeds.
+    """
+    props = {"id": "repo::atlas_fixture", "name": "atlas_fixture", "source": "/app"}
+    rec = Record([("props", props)])
+
+    # Root cause reproduction: in operator fails because 'props' != props
+    assert ("props" in rec) is False
+    assert rec.get("props") == props
+
+    # Verify GraphRetriever.get_repository succeeds with Record
+    mock_session = MagicMock(spec=Session)
+    mock_session.run.return_value.single.return_value = rec
+    retriever = GraphRetriever()
+    repo = retriever.get_repository("repo::atlas_fixture", session=mock_session)
+    assert isinstance(repo, Repository)
+    assert repo.id == "repo::atlas_fixture"
+
+
+def test_get_repository_graph_with_real_neo4j_record_instances():
+    """Verify GraphRetriever reconstructs the complete UCM when driver returns real neo4j.Record objects."""
+    resolved_fixture = resolve_repository(repo_path=FIXTURE_DIR, repo_name="atlas_fixture")
+    repo_rec = Record([("props", resolved_fixture.repository.to_dict())])
+    file_recs = [Record([("props", f.to_dict())]) for f in resolved_fixture.files]
+    module_recs = [Record([("props", m.to_dict())]) for m in resolved_fixture.modules]
+    class_recs = [Record([("props", c.to_dict())]) for c in resolved_fixture.classes]
+    func_recs = [Record([("props", fn.to_dict())]) for fn in resolved_fixture.functions]
+    meth_recs = [Record([("props", mt.to_dict())]) for mt in resolved_fixture.methods]
+    import_recs = [Record([("props", im.to_dict())]) for im in resolved_fixture.imports]
+
+    rel_recs = []
+    for r in resolved_fixture.relationships:
+        props = {}
+        if r.location:
+            props.update(
+                {
+                    "start_line": r.location.start_point.line,
+                    "start_column": r.location.start_point.column,
+                    "end_line": r.location.end_point.line,
+                    "end_column": r.location.end_point.column,
+                    "start_byte": r.location.start_byte,
+                    "end_byte": r.location.end_byte,
+                }
+            )
+        props.update(r.metadata)
+        rel_recs.append(
+            Record(
+                [
+                    ("source_id", r.source_id),
+                    ("target_id", r.target_id),
+                    ("rel_type", r.rel_type.value),
+                    ("properties", props),
+                ]
+            )
+        )
+
+    mock_session = MagicMock(spec=Session)
+
+    def mock_run(query: str, **kwargs):
+        res = MagicMock()
+        if "MATCH (r:Repository" in query:
+            res.single.return_value = repo_rec
+        elif "MATCH (n:File" in query:
+            res.__iter__.return_value = file_recs
+        elif "MATCH (n:Module" in query:
+            res.__iter__.return_value = module_recs
+        elif "MATCH (n:Class" in query:
+            res.__iter__.return_value = class_recs
+        elif "MATCH (n:Function" in query:
+            res.__iter__.return_value = func_recs
+        elif "MATCH (n:Method" in query:
+            res.__iter__.return_value = meth_recs
+        elif "MATCH (n:Import" in query:
+            res.__iter__.return_value = import_recs
+        elif "MATCH (src)-[r]->(tgt)" in query:
+            res.__iter__.return_value = rel_recs
+        else:
+            res.__iter__.return_value = []
+            res.single.return_value = None
+        return res
+
+    mock_session.run.side_effect = mock_run
+
+    retriever = GraphRetriever()
+    ucm = retriever.get_repository_graph(resolved_fixture.repository.id, session=mock_session)
+
+    assert ucm is not None
+    assert ucm.repository.id == resolved_fixture.repository.id
+    assert len(ucm.files) == 7
+    assert len(ucm.modules) == 7
+    assert len(ucm.classes) == 7
+    assert len(ucm.functions) == 11
+    assert len(ucm.methods) == 12
+    assert len(ucm.imports) == 8
+    assert len(ucm.relationships) == 58
+
+
+def test_get_entity_by_id_with_neo4j_record():
+    """Verify get_entity_by_id functions correctly with real neo4j.Record instances."""
+    mock_session = MagicMock(spec=Session)
+    retriever = GraphRetriever()
+
+    # Specific label File lookup
+    file_props = {
+        "id": "repo::x::file::foo.py",
+        "repo_id": "repo::x",
+        "path": "foo.py",
+        "language": "python",
+        "start_line": 1,
+        "end_line": 10,
+        "start_byte": 0,
+        "end_byte": 50,
+    }
+    mock_session.run.return_value.single.return_value = Record([("props", file_props)])
+    entity = retriever.get_entity_by_id("repo::x::file::foo.py", session=mock_session)
+    assert isinstance(entity, File)
+    assert entity.id == "repo::x::file::foo.py"
+
+    # Multi-label dynamic lookup
+    fn_props = {
+        "id": "custom::fn",
+        "repo_id": "repo::x",
+        "name": "my_fn",
+        "qualified_name": "my_fn",
+        "file_path": "foo.py",
+        "language": "python",
+        "start_line": 2,
+        "end_line": 5,
+        "start_byte": 10,
+        "end_byte": 30,
+    }
+    mock_session.run.return_value.single.return_value = Record(
+        [
+            ("props", fn_props),
+            ("labels", ["Function", "Custom"]),
+        ]
+    )
+    custom_entity = retriever.get_entity_by_id("custom::fn", session=mock_session)
+    assert isinstance(custom_entity, Function)
+    assert custom_entity.name == "my_fn"
+
