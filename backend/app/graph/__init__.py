@@ -1,5 +1,13 @@
 """Graph traversal and analysis layer for Atlas AI."""
 
+from app.graph.impact import (
+    AffectedFile,
+    ImpactAnalysisError,
+    ImpactAnalysisResult,
+    ImpactAnalyzer,
+    analyze_impact,
+    resolve_affected_files,
+)
 from app.graph.traversal import (
     ALL_ALLOWED_RELATIONSHIPS,
     DEFAULT_DEPENDENCY_RELATIONSHIPS,
@@ -22,13 +30,18 @@ from app.graph.traversal import (
 
 __all__ = [
     "ALL_ALLOWED_RELATIONSHIPS",
+    "AffectedFile",
     "DEFAULT_DEPENDENCY_RELATIONSHIPS",
     "DEFAULT_TRANSITIVE_MAX_DEPTH",
     "GraphTraversal",
     "GraphTraversalError",
+    "ImpactAnalysisError",
+    "ImpactAnalysisResult",
+    "ImpactAnalyzer",
     "TraversalDirection",
     "TraversalNode",
     "TraversalResult",
+    "analyze_impact",
     "build_traversal_cypher",
     "get_dependencies",
     "get_dependents",
@@ -36,6 +49,7 @@ __all__ = [
     "get_direct_dependents",
     "get_transitive_dependencies",
     "get_transitive_dependents",
+    "resolve_affected_files",
     "validate_depth",
     "validate_relationship_types",
 ]
