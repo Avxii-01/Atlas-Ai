@@ -14,24 +14,27 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import { getRepositoryGraph, ApiClientError } from "../../lib/api.ts";
+import { getRepositoryGraph, getRepositoryImpact, ApiClientError } from "../../lib/api.ts";
 import {
   mapGraphResponseToReactFlow,
   type EntityNodeData,
 } from "../../lib/graphMapper.ts";
 import type { GraphFetchStatus, RepositoryGraphResponse } from "../../lib/types.ts";
 import EntityNode from "./EntityNode.tsx";
+import ImpactDetailsPanel from "./ImpactDetailsPanel.tsx";
 
 export interface RepositoryGraphViewProps {
   initialRepositoryId?: string;
   onBackToAnalysis?: () => void;
   fetchGraphFn?: (repositoryId: string) => Promise<RepositoryGraphResponse>;
+  fetchImpactFn?: typeof getRepositoryImpact;
 }
 
 export default function RepositoryGraphView({
   initialRepositoryId = "",
   onBackToAnalysis,
   fetchGraphFn = getRepositoryGraph,
+  fetchImpactFn = getRepositoryImpact,
 }: RepositoryGraphViewProps) {
   const [repositoryIdInput, setRepositoryIdInput] = useState<string>(initialRepositoryId);
   const [prevInitialId, setPrevInitialId] = useState<string>(initialRepositoryId);
@@ -128,14 +131,58 @@ export default function RepositoryGraphView({
 
   const handleNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
-      setSelectedEntity((node.data as unknown as EntityNodeData) || null);
+      const entityData = (node.data as unknown as EntityNodeData) || null;
+      setSelectedEntity(entityData);
+      setNodes((prevNodes) =>
+        prevNodes.map((n) => ({
+          ...n,
+          selected: n.id === node.id,
+        }))
+      );
     },
-    []
+    [setNodes]
   );
 
   const handlePaneClick = useCallback(() => {
     setSelectedEntity(null);
-  }, []);
+    setNodes((prevNodes) =>
+      prevNodes.map((n) => ({
+        ...n,
+        selected: false,
+      }))
+    );
+  }, [setNodes]);
+
+  const handleSelectEntityById = useCallback(
+    (entityId: string) => {
+      const targetNode = nodes.find((n) => n.id === entityId);
+      if (targetNode) {
+        setSelectedEntity(targetNode.data as unknown as EntityNodeData);
+        setNodes((prevNodes) =>
+          prevNodes.map((n) => ({
+            ...n,
+            selected: n.id === entityId,
+          }))
+        );
+        rfInstance?.setCenter(
+          targetNode.position.x + 100,
+          targetNode.position.y + 40,
+          { duration: 400, zoom: Math.max(rfInstance.getZoom(), 0.8) }
+        );
+      }
+    },
+    [nodes, rfInstance, setNodes]
+  );
+
+  const handleCloseImpactPanel = useCallback(() => {
+    setSelectedEntity(null);
+    setNodes((prevNodes) =>
+      prevNodes.map((n) => ({
+        ...n,
+        selected: false,
+      }))
+    );
+  }, [setNodes]);
 
   return (
     <div className="graph-view-wrapper" data-testid="repository-graph-view">
@@ -218,8 +265,9 @@ export default function RepositoryGraphView({
         </div>
       </div>
 
-      {/* Main Canvas Area */}
-      <div className="graph-canvas-container" data-testid="graph-canvas-container">
+      {/* Main Canvas & Impact Layout Area */}
+      <div className="graph-layout-body">
+        <div className="graph-canvas-container" data-testid="graph-canvas-container">
         {/* Loading Overlay */}
         {status === "loading" && (
           <div
@@ -336,29 +384,16 @@ export default function RepositoryGraphView({
           <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#334155" />
           <Controls showInteractive={false} />
         </ReactFlow>
+        </div>
 
-        {/* Selected Node Inspector Pill */}
-        {selectedEntity && (
-          <div className="graph-inspector-panel" data-testid="graph-inspector-panel">
-            <div className="inspector-header">
-              <span className="inspector-type">{selectedEntity.label || selectedEntity.type}</span>
-              <button
-                type="button"
-                className="btn-inspector-close"
-                onClick={() => setSelectedEntity(null)}
-                aria-label="Close entity inspection"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="inspector-name" title={selectedEntity.displayName}>
-              {selectedEntity.displayName}
-            </div>
-            <div className="inspector-id" title={selectedEntity.id}>
-              {selectedEntity.id}
-            </div>
-          </div>
-        )}
+        {/* Impact Analysis Details Panel */}
+        <ImpactDetailsPanel
+          selectedEntity={selectedEntity}
+          repositoryId={activeRepositoryId}
+          onClose={handleCloseImpactPanel}
+          onSelectEntity={handleSelectEntityById}
+          fetchImpactFn={fetchImpactFn}
+        />
       </div>
     </div>
   );
