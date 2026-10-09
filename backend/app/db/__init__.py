@@ -1,5 +1,13 @@
 """Database abstractions and connectivity for Atlas AI."""
 
+from app.db.entity_persister import (
+    EntityPersistenceResult,
+    EntityPersister,
+    Neo4jPersistenceError,
+    entity_to_properties,
+    get_entity_merge_cypher,
+    persist_entities,
+)
 from app.db.neo4j import (
     Neo4jConnectionError,
     close_driver,
@@ -30,9 +38,12 @@ from app.db.schema import (
 
 __all__ = [
     "ConstraintDefinition",
+    "EntityPersistenceResult",
+    "EntityPersister",
     "IndexDefinition",
     "NODE_SCHEMAS",
     "Neo4jConnectionError",
+    "Neo4jPersistenceError",
     "Neo4jSchemaError",
     "NodeLabel",
     "NodePropertySchema",
@@ -41,16 +52,20 @@ __all__ = [
     "RELATIONSHIP_PATTERNS",
     "RelationshipPatternSchema",
     "close_driver",
+    "entity_to_properties",
     "get_all_schema_statements",
     "get_constraint_statements",
     "get_driver",
+    "get_entity_merge_cypher",
     "get_index_statements",
     "get_neo4j_session",
     "get_schema_constraints",
     "get_schema_indexes",
     "init_driver",
     "init_schema",
+    "persist_entities",
     "set_driver",
     "verify_connectivity",
 ]
+
 
