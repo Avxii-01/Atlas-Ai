@@ -1,4 +1,4 @@
-import GraphCanvas from "@/components/graph/GraphCanvas";
+import RepositoryAnalysisView from "@/components/analysis/RepositoryAnalysisView";
 
 export default function Home() {
   return (
@@ -10,29 +10,23 @@ export default function Home() {
           <div>
             <h1 className="brand-title">Atlas AI</h1>
           </div>
-          <span className="brand-badge">P0 Foundation</span>
+          <span className="brand-badge">Repository Analysis</span>
         </div>
         <div className="status-section">
           <div className="status-pill">
             <span className="status-dot" />
-            <span>Standalone Frontend</span>
+            <span>Frontend Ready</span>
           </div>
         </div>
       </header>
 
-      {/* Main Graph Visualization View */}
-      <main className="canvas-main">
-        <div className="canvas-info-overlay">
-          <div className="canvas-info-title">Repository Knowledge Graph Canvas</div>
-          <div className="canvas-info-desc">React Flow Foundation • Interactive pan, zoom, and node canvas</div>
-        </div>
-        <GraphCanvas />
-      </main>
+      {/* Main Analysis Workflow */}
+      <RepositoryAnalysisView />
 
       {/* Footer Status Shell */}
       <footer className="app-footer">
-        <span>Atlas AI P0-04 • Frontend Foundation</span>
-        <span>Independent Runtime Mode</span>
+        <span>Atlas AI P0-21 • Repository Analysis Workflow</span>
+        <span>Connected API Mode</span>
       </footer>
     </div>
   );
