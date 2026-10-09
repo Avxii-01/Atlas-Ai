@@ -5,11 +5,13 @@ import { RepositoryAnalysisResponse } from "../../lib/types";
 export interface AnalysisResultCardProps {
   result: RepositoryAnalysisResponse;
   onReset?: () => void;
+  onViewGraph?: (repositoryId: string) => void;
 }
 
 export default function AnalysisResultCard({
   result,
   onReset,
+  onViewGraph,
 }: AnalysisResultCardProps) {
   const { summary } = result;
 
@@ -41,16 +43,28 @@ export default function AnalysisResultCard({
           <span className="status-dot-success" />
           <span>Analysis Completed</span>
         </div>
-        {onReset && (
-          <button
-            type="button"
-            onClick={onReset}
-            className="btn-secondary-sm"
-            data-testid="analyze-another-btn"
-          >
-            Analyze Another
-          </button>
-        )}
+        <div className="result-header-actions">
+          {onViewGraph && (
+            <button
+              type="button"
+              onClick={() => onViewGraph(result.repository_id)}
+              className="btn-primary-sm"
+              data-testid="view-graph-btn"
+            >
+              View Knowledge Graph →
+            </button>
+          )}
+          {onReset && (
+            <button
+              type="button"
+              onClick={onReset}
+              className="btn-secondary-sm"
+              data-testid="analyze-another-btn"
+            >
+              Analyze Another
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="repo-meta-row">
