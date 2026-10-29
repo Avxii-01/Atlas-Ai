@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   ReactFlow,
   Background,
@@ -26,7 +26,10 @@ import ImpactDetailsPanel from "./ImpactDetailsPanel.tsx";
 export interface RepositoryGraphViewProps {
   initialRepositoryId?: string;
   onBackToAnalysis?: () => void;
-  fetchGraphFn?: (repositoryId: string) => Promise<RepositoryGraphResponse>;
+  fetchGraphFn?: (
+    repositoryId: string,
+    options?: { limit?: number; signal?: AbortSignal }
+  ) => Promise<RepositoryGraphResponse>;
   fetchImpactFn?: typeof getRepositoryImpact;
 }
 
@@ -47,6 +50,12 @@ export default function RepositoryGraphView({
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
+  // Race condition & cancellation guards
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const activeRepoIdRef = useRef<string | null>(null);
+  const requestIdRef = useRef<number>(0);
+  const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
+
   // Adjust state during render if prop changes (React 19 pattern)
   if (initialRepositoryId !== prevInitialId) {
     setPrevInitialId(initialRepositoryId);
@@ -54,6 +63,11 @@ export default function RepositoryGraphView({
   }
 
   const nodeTypes = useMemo(() => ({ entityNode: EntityNode }), []);
+
+  const handleInit = useCallback((instance: ReactFlowInstance) => {
+    setRfInstance(instance);
+    rfInstanceRef.current = instance;
+  }, []);
 
   const loadGraph = useCallback(
     async (repoId: string) => {
@@ -64,12 +78,32 @@ export default function RepositoryGraphView({
         return;
       }
 
+      // Abort prior in-flight request if active
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      activeRepoIdRef.current = cleanId;
+      const currentRequestId = ++requestIdRef.current;
+
       setStatus("loading");
       setErrorMessage(null);
       setSelectedEntity(null);
 
       try {
-        const response = await fetchGraphFn(cleanId);
+        const response = await fetchGraphFn(cleanId, { signal: controller.signal });
+
+        // Stale response guard: ensure response matches active request and was not aborted
+        if (
+          requestIdRef.current !== currentRequestId ||
+          activeRepoIdRef.current !== cleanId ||
+          controller.signal.aborted
+        ) {
+          return;
+        }
+
         setActiveRepositoryId(response.repository_id || cleanId);
 
         if (!response.nodes || response.nodes.length === 0) {
@@ -86,16 +120,31 @@ export default function RepositoryGraphView({
 
         // Fit view after nodes render
         setTimeout(() => {
-          rfInstance?.fitView({ padding: 0.15, duration: 300 });
+          (rfInstanceRef.current || rfInstance)?.fitView({ padding: 0.15, duration: 300 });
         }, 50);
       } catch (err: unknown) {
-        setStatus("error");
-        if (err instanceof ApiClientError) {
-          setErrorMessage(err.message);
-        } else if (err instanceof Error) {
-          setErrorMessage(err.message);
-        } else {
-          setErrorMessage("Failed to retrieve repository graph. Please check service connectivity.");
+        // Silently ignore aborted requests to prevent misleading error displays
+        if (
+          controller.signal.aborted ||
+          (err instanceof ApiClientError && err.code === "ABORTED") ||
+          (err instanceof Error && err.name === "AbortError")
+        ) {
+          return;
+        }
+
+        // Only commit error if this request is still the active request
+        if (
+          requestIdRef.current === currentRequestId &&
+          activeRepoIdRef.current === cleanId
+        ) {
+          setStatus("error");
+          if (err instanceof ApiClientError) {
+            setErrorMessage(err.message);
+          } else if (err instanceof Error) {
+            setErrorMessage(err.message);
+          } else {
+            setErrorMessage("Failed to retrieve repository graph. Please check service connectivity.");
+          }
         }
       }
     },
@@ -115,6 +164,9 @@ export default function RepositoryGraphView({
     }
     return () => {
       isMounted = false;
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
   }, [initialRepositoryId, loadGraph]);
 
@@ -126,7 +178,7 @@ export default function RepositoryGraphView({
   };
 
   const handleFitView = useCallback(() => {
-    rfInstance?.fitView({ padding: 0.15, duration: 400 });
+    (rfInstanceRef.current || rfInstance)?.fitView({ padding: 0.15, duration: 400 });
   }, [rfInstance]);
 
   const handleNodeClick = useCallback(
@@ -374,7 +426,7 @@ export default function RepositoryGraphView({
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           nodeTypes={nodeTypes}
-          onInit={setRfInstance}
+          onInit={handleInit}
           onNodeClick={handleNodeClick}
           onPaneClick={handlePaneClick}
           fitView

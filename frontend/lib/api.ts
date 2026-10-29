@@ -220,16 +220,32 @@ export async function analyzeRepository(
 }
 
 /**
+ * Options for getRepositoryGraph API requests.
+ */
+export interface GetRepositoryGraphOptions {
+  limit?: number;
+  signal?: AbortSignal;
+}
+
+/**
  * Retrieves the code knowledge graph for a repository from GET /api/v1/repositories/{id}/graph.
  *
+ * Supports backwards-compatible invocation:
+ * - getRepositoryGraph(id)
+ * - getRepositoryGraph(id, limit)
+ * - getRepositoryGraph(id, { limit, signal })
+ * - getRepositoryGraph(id, limit, { signal })
+ *
  * @param repositoryId Unique identifier of the repository.
- * @param limit Optional maximum number of nodes to return.
+ * @param optionsOrLimit Optional numeric limit or options object containing limit and signal.
+ * @param maybeOptions Optional additional options if limit was passed as a number.
  * @returns Promise resolving to the validated RepositoryGraphResponse.
- * @throws ApiClientError on HTTP errors, missing parameters, or network disruption.
+ * @throws ApiClientError on HTTP errors, missing parameters, network disruption, or abort.
  */
 export async function getRepositoryGraph(
   repositoryId: string,
-  limit?: number
+  optionsOrLimit?: number | GetRepositoryGraphOptions,
+  maybeOptions?: { signal?: AbortSignal }
 ): Promise<RepositoryGraphResponse> {
   const cleanId = repositoryId ? repositoryId.trim() : "";
 
@@ -240,6 +256,19 @@ export async function getRepositoryGraph(
       undefined,
       "INVALID_ID"
     );
+  }
+
+  let limit: number | undefined;
+  let signal: AbortSignal | undefined;
+
+  if (typeof optionsOrLimit === "number") {
+    limit = optionsOrLimit;
+    signal = maybeOptions?.signal;
+  } else if (typeof optionsOrLimit === "object" && optionsOrLimit !== null) {
+    limit = optionsOrLimit.limit;
+    signal = optionsOrLimit.signal;
+  } else {
+    signal = maybeOptions?.signal;
   }
 
   const baseUrl = getApiBaseUrl();
@@ -253,8 +282,15 @@ export async function getRepositoryGraph(
       headers: {
         Accept: "application/json",
       },
+      signal,
     });
   } catch (err: unknown) {
+    if (
+      (err instanceof DOMException && err.name === "AbortError") ||
+      (err instanceof Error && err.name === "AbortError")
+    ) {
+      throw new ApiClientError("Repository graph request was cancelled", 0, undefined, "ABORTED");
+    }
     const originalMessage = err instanceof Error ? err.message : String(err);
     throw new ApiClientError(
       "Unable to reach backend service to retrieve repository graph.",

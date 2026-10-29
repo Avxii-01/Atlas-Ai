@@ -24,6 +24,11 @@ class GraphWorkflowState {
   edges: Edge[] = [];
   callCount: number = 0;
 
+  // Race condition & cancellation guards
+  private currentAbortController: AbortController | null = null;
+  private activeRepoId: string | null = null;
+  private currentRequestId: number = 0;
+
   constructor(initialRepositoryId: string = "") {
     this.repositoryIdInput = initialRepositoryId;
     this.activeRepositoryId = initialRepositoryId;
@@ -34,26 +39,48 @@ class GraphWorkflowState {
   }
 
   async loadGraph(
-    fetchFn: (repoId: string) => Promise<RepositoryGraphResponse>
+    fetchFn: (repoId: string, options?: { signal?: AbortSignal }) => Promise<RepositoryGraphResponse>,
+    explicitRepoId?: string
   ): Promise<void> {
-    const cleanId = this.repositoryIdInput.trim();
+    const targetId = explicitRepoId !== undefined ? explicitRepoId : this.repositoryIdInput;
+    const cleanId = targetId.trim();
     if (!cleanId) {
       this.errorMessage = "Please enter a valid repository identifier.";
       this.status = "error";
       return;
     }
 
-    // Guard duplicate submissions while loading
-    if (this.status === "loading") {
+    // In UI, submit button is disabled when status is loading AND input has not changed
+    if (this.status === "loading" && this.activeRepoId === cleanId && explicitRepoId === undefined) {
       return;
     }
+
+    // Abort prior in-flight request if present
+    if (this.currentAbortController) {
+      this.currentAbortController.abort();
+    }
+
+    const controller = new AbortController();
+    this.currentAbortController = controller;
+    this.activeRepoId = cleanId;
+    const reqId = ++this.currentRequestId;
 
     this.status = "loading";
     this.errorMessage = null;
 
     try {
       this.callCount++;
-      const response = await fetchFn(cleanId);
+      const response = await fetchFn(cleanId, { signal: controller.signal });
+
+      // Stale response guard: ensure response matches active request and was not aborted
+      if (
+        this.currentRequestId !== reqId ||
+        this.activeRepoId !== cleanId ||
+        controller.signal.aborted
+      ) {
+        return;
+      }
+
       this.activeRepositoryId = response.repository_id || cleanId;
 
       if (!response.nodes || response.nodes.length === 0) {
@@ -68,18 +95,37 @@ class GraphWorkflowState {
       this.edges = mapped.edges;
       this.status = "success";
     } catch (err: unknown) {
-      this.status = "error";
-      if (err instanceof ApiClientError) {
-        this.errorMessage = err.message;
-      } else if (err instanceof Error) {
-        this.errorMessage = err.message;
-      } else {
-        this.errorMessage = "Failed to retrieve repository graph.";
+      if (
+        controller.signal.aborted ||
+        (err instanceof ApiClientError && err.code === "ABORTED") ||
+        (err instanceof Error && err.name === "AbortError")
+      ) {
+        return;
+      }
+
+      if (this.currentRequestId === reqId && this.activeRepoId === cleanId) {
+        this.status = "error";
+        if (err instanceof ApiClientError) {
+          this.errorMessage = err.message;
+        } else if (err instanceof Error) {
+          this.errorMessage = err.message;
+        } else {
+          this.errorMessage = "Failed to retrieve repository graph.";
+        }
       }
     }
   }
 
+  unmount() {
+    if (this.currentAbortController) {
+      this.currentAbortController.abort();
+    }
+  }
+
   reset() {
+    if (this.currentAbortController) {
+      this.currentAbortController.abort();
+    }
     this.status = "idle";
     this.errorMessage = null;
     this.nodes = [];
@@ -261,5 +307,176 @@ describe("Graph Visualization Workflow State Machine (P0-22)", () => {
     assert.equal(workflow.activeRepositoryId, "repo_B");
     assert.equal(workflow.nodes.length, 0, "Stale nodes from repo_A must be cleared");
     assert.equal(workflow.edges.length, 0, "Stale edges from repo_A must be cleared");
+  });
+
+  it("prevents race condition: slow response for Repo A cannot overwrite newer response for Repo B", async () => {
+    const workflow = new GraphWorkflowState("repo_A");
+
+    let resolveRepoA: (val: RepositoryGraphResponse) => void = () => {};
+    let rejectRepoA: (reason?: unknown) => void = () => {};
+    const repoAPromise = new Promise<RepositoryGraphResponse>((resolve, reject) => {
+      resolveRepoA = resolve;
+      rejectRepoA = reject;
+    });
+
+    // 1. User loads repo_A (slow network)
+    const loadAPromise = workflow.loadGraph(async (_id, options) => {
+      options?.signal?.addEventListener("abort", () => {
+        rejectRepoA(new ApiClientError("Request aborted", 0, undefined, "ABORTED"));
+      });
+      return repoAPromise;
+    });
+
+    assert.equal(workflow.status, "loading");
+    assert.equal(workflow.callCount, 1);
+
+    // 2. User quickly switches input to repo_B and triggers load
+    const repoBResponse: RepositoryGraphResponse = {
+      repository_id: "repo_B",
+      nodes: [
+        { id: "repo:repo_B", label: "Repository", name: "repo_B", type: "Repository" },
+      ],
+      relationships: [],
+    };
+
+    workflow.setInput("repo_B");
+    const loadBPromise = workflow.loadGraph(async () => repoBResponse);
+    await loadBPromise;
+
+    // Repo B must now be the active state
+    assert.equal(workflow.status, "success");
+    assert.equal(workflow.activeRepositoryId, "repo_B");
+    assert.equal(workflow.nodes.length, 1);
+    assert.equal(workflow.nodes[0].id, "repo:repo_B");
+
+    // 3. Stale repo_A completes afterward
+    resolveRepoA(sampleSuccessGraph);
+    await loadAPromise;
+
+    // Invariant: Repo A response MUST NOT overwrite active Repo B state
+    assert.equal(workflow.status, "success");
+    assert.equal(workflow.activeRepositoryId, "repo_B");
+    assert.equal(workflow.nodes.length, 1);
+    assert.equal(workflow.nodes[0].id, "repo:repo_B");
+  });
+
+  it("rapid repository changes supersede earlier in-flight requests and retain only the newest graph", async () => {
+    const workflow = new GraphWorkflowState("repo_1");
+
+    let abortedCount = 0;
+    const makeFailingOrAbortedFetch = (id: string) => async (_repoId: string, options?: { signal?: AbortSignal }) => {
+      return new Promise<RepositoryGraphResponse>((resolve, reject) => {
+        options?.signal?.addEventListener("abort", () => {
+          abortedCount++;
+          reject(new ApiClientError("Request aborted", 0, undefined, "ABORTED"));
+        });
+        setTimeout(() => {
+          resolve({
+            repository_id: id,
+            nodes: [{ id: `node:${id}`, label: "Repository", name: id, type: "Repository" }],
+            relationships: [],
+          });
+        }, 50);
+      });
+    };
+
+    // Trigger repo 1, then immediately repo 2, then repo 3
+    const p1 = workflow.loadGraph(makeFailingOrAbortedFetch("repo_1"));
+    workflow.setInput("repo_2");
+    const p2 = workflow.loadGraph(makeFailingOrAbortedFetch("repo_2"));
+    workflow.setInput("repo_3");
+    const p3 = workflow.loadGraph(async () => ({
+      repository_id: "repo_3",
+      nodes: [{ id: "node:repo_3", label: "Repository", name: "repo_3", type: "Repository" }],
+      relationships: [],
+    }));
+
+    await Promise.all([p1, p2, p3]);
+
+    assert.equal(workflow.status, "success");
+    assert.equal(workflow.activeRepositoryId, "repo_3");
+    assert.equal(workflow.nodes[0].id, "node:repo_3");
+    assert.equal(abortedCount, 2, "Both superseded requests must have had abort triggered");
+  });
+
+  it("stale request A failing with error does not overwrite active request B's success or loading state", async () => {
+    const workflow = new GraphWorkflowState("failing_repo_A");
+
+    let rejectRepoA: (reason?: unknown) => void = () => {};
+    const repoAPromise = new Promise<RepositoryGraphResponse>((_resolve, reject) => {
+      rejectRepoA = reject;
+    });
+
+    const loadAPromise = workflow.loadGraph(async () => repoAPromise);
+    assert.equal(workflow.status, "loading");
+
+    // Supersede with successful Repo B
+    workflow.setInput("working_repo_B");
+    const loadBPromise = workflow.loadGraph(async () => ({
+      repository_id: "working_repo_B",
+      nodes: [{ id: "node:B", label: "Repository", name: "B", type: "Repository" }],
+      relationships: [],
+    }));
+
+    await loadBPromise;
+    assert.equal(workflow.status, "success");
+    assert.equal(workflow.errorMessage, null);
+
+    // Stale Repo A rejects with 500 error
+    rejectRepoA(new ApiClientError("Database failure for Repo A", 500));
+    await loadAPromise;
+
+    // Invariant: Status must remain success for Repo B, NOT overwritten by Repo A's error
+    assert.equal(workflow.status, "success");
+    assert.equal(workflow.activeRepositoryId, "working_repo_B");
+    assert.equal(workflow.errorMessage, null);
+  });
+
+  it("cancelled request via AbortSignal does not transition UI into error state", async () => {
+    const workflow = new GraphWorkflowState("repo_cancelled");
+
+    const p = workflow.loadGraph(async (_id, options) => {
+      return new Promise<RepositoryGraphResponse>((_resolve, reject) => {
+        options?.signal?.addEventListener("abort", () => {
+          reject(new ApiClientError("Request cancelled", 0, undefined, "ABORTED"));
+        });
+      });
+    });
+
+    assert.equal(workflow.status, "loading");
+    workflow.unmount(); // Simulates unmount or user cancellation
+    await p;
+
+    // Invariant: Status must NOT be error
+    assert.notEqual(workflow.status, "error");
+    assert.equal(workflow.errorMessage, null);
+  });
+
+  it("unmount cleanup aborts active request and prevents state updates after unmount", async () => {
+    const workflow = new GraphWorkflowState("repo_unmount");
+
+    let signalAborted = false;
+    let resolvePending: (val: RepositoryGraphResponse) => void = () => {};
+    const pendingPromise = new Promise<RepositoryGraphResponse>((resolve) => {
+      resolvePending = resolve;
+    });
+
+    const p = workflow.loadGraph(async (_id, options) => {
+      options?.signal?.addEventListener("abort", () => {
+        signalAborted = true;
+      });
+      return pendingPromise;
+    });
+
+    assert.equal(workflow.status, "loading");
+    workflow.unmount();
+    assert.equal(signalAborted, true, "Signal must be aborted on unmount");
+
+    // Resolve after unmount
+    resolvePending(sampleSuccessGraph);
+    await p;
+
+    // State must not have committed the nodes
+    assert.equal(workflow.nodes.length, 0);
   });
 });
