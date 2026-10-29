@@ -768,3 +768,355 @@ def test_get_repository_overview_empty_and_missing():
     assert total_files == 0
 
 
+def test_get_entity_children_bounded_cypher_and_parameters():
+    """Verify get_entity_children executes read-only parameterized Cypher with LIMIT, SKIP, and repository isolation."""
+    mock_session = MagicMock(spec=Session)
+    mock_record = Record(
+        [
+            ("repo_exists", True),
+            (
+                "parent_props",
+                {
+                    "id": "repo::test::file::models.py",
+                    "repo_id": "repo::test",
+                    "path": "models.py",
+                    "language": "python",
+                    "start_line": 1,
+                    "end_line": 21,
+                },
+            ),
+            ("parent_labels", ["File"]),
+            ("total_children", 2),
+            (
+                "children_props",
+                [
+                    {
+                        "id": "repo::test::class::Item",
+                        "repo_id": "repo::test",
+                        "name": "Item",
+                        "qualified_name": "models.Item",
+                        "file_path": "models.py",
+                        "language": "python",
+                        "start_line": 6,
+                        "end_line": 16,
+                        "start_byte": 50,
+                        "end_byte": 200,
+                    },
+                    {
+                        "id": "repo::test::function::create_item",
+                        "repo_id": "repo::test",
+                        "name": "create_item",
+                        "qualified_name": "models.create_item",
+                        "file_path": "models.py",
+                        "language": "python",
+                        "start_line": 19,
+                        "end_line": 21,
+                        "start_byte": 250,
+                        "end_byte": 350,
+                    },
+                ],
+            ),
+            ("children_labels", [["Class"], ["Function"]]),
+            (
+                "edges",
+                [
+                    {
+                        "source_id": "repo::test::file::models.py",
+                        "target_id": "repo::test::class::Item",
+                        "rel_type": "CONTAINS",
+                        "properties": {},
+                    },
+                    {
+                        "source_id": "repo::test::file::models.py",
+                        "target_id": "repo::test::function::create_item",
+                        "rel_type": "CONTAINS",
+                        "properties": {},
+                    },
+                ],
+            ),
+        ]
+    )
+    mock_session.run.return_value.single.return_value = mock_record
+
+    retriever = GraphRetriever()
+    res = retriever.get_entity_children("repo::test", "repo::test::file::models.py", limit=10, offset=0, session=mock_session)
+
+    assert res["repo_exists"] is True
+    assert res["parent"] is not None
+    assert res["parent"].id == "repo::test::file::models.py"
+    assert len(res["children"]) == 2
+    assert res["children"][0].id == "repo::test::class::Item"
+    assert res["children"][1].id == "repo::test::function::create_item"
+    assert len(res["edges"]) == 2
+    assert res["total_children"] == 2
+
+    # Verify query and parameters
+    mock_session.run.assert_called_once()
+    executed_query, executed_params = mock_session.run.call_args[0][0], mock_session.run.call_args[1]
+
+    assert executed_params["repo_id"] == "repo::test"
+    assert executed_params["entity_id"] == "repo::test::file::models.py"
+    assert executed_params["limit"] == 10
+    assert executed_params["offset"] == 0
+
+    assert "OPTIONAL MATCH (r:Repository {id: $repo_id})" in executed_query
+    assert "SKIP $offset" in executed_query
+    assert "LIMIT $limit" in executed_query
+    assert "count(child_count)" in executed_query
+
+
+def test_get_entity_children_missing_repo_and_missing_entity():
+    """Verify get_entity_children properly identifies missing repository vs missing entity."""
+    mock_session = MagicMock(spec=Session)
+    retriever = GraphRetriever()
+
+    # 1. Missing repository scenario: repo_exists = False
+    mock_session.run.return_value.single.return_value = Record(
+        [
+            ("repo_exists", False),
+            ("parent_props", None),
+            ("parent_labels", []),
+            ("total_children", 0),
+            ("children_props", []),
+            ("children_labels", []),
+            ("edges", []),
+        ]
+    )
+    res_repo_missing = retriever.get_entity_children("repo::missing", "file::app.py", session=mock_session)
+    assert res_repo_missing["repo_exists"] is False
+    assert res_repo_missing["parent"] is None
+
+    # 2. Missing entity scenario: repo_exists = True, but parent_props = None
+    mock_session.run.return_value.single.return_value = Record(
+        [
+            ("repo_exists", True),
+            ("parent_props", None),
+            ("parent_labels", []),
+            ("total_children", 0),
+            ("children_props", []),
+            ("children_labels", []),
+            ("edges", []),
+        ]
+    )
+    res_entity_missing = retriever.get_entity_children("repo::exists", "file::missing.py", session=mock_session)
+    assert res_entity_missing["repo_exists"] is True
+    assert res_entity_missing["parent"] is None
+
+
+def test_get_entity_neighbors_cypher_direction_and_parameters():
+    """Verify get_entity_neighbors generates correct Cypher patterns for incoming, outgoing, and both directions."""
+    mock_session = MagicMock(spec=Session)
+    mock_record = Record(
+        [
+            ("repo_exists", True),
+            (
+                "center_props",
+                {
+                    "id": "repo::test::class::Item",
+                    "repo_id": "repo::test",
+                    "name": "Item",
+                    "qualified_name": "models.Item",
+                    "file_path": "models.py",
+                    "language": "python",
+                    "start_line": 6,
+                    "end_line": 16,
+                    "start_byte": 50,
+                    "end_byte": 200,
+                },
+            ),
+            ("center_labels", ["Class"]),
+            ("total_relationships", 1),
+            ("total_neighbors", 1),
+            (
+                "edges",
+                [
+                    {
+                        "source_id": "repo::test::file::models.py",
+                        "target_id": "repo::test::class::Item",
+                        "rel_type": "CONTAINS",
+                        "properties": {},
+                    }
+                ],
+            ),
+            (
+                "neighbor_props",
+                [
+                    {
+                        "id": "repo::test::file::models.py",
+                        "repo_id": "repo::test",
+                        "path": "models.py",
+                        "language": "python",
+                        "start_line": 1,
+                        "end_line": 21,
+                        "start_byte": 0,
+                        "end_byte": 450,
+                    }
+                ],
+            ),
+            ("neighbor_labels", [["File"]]),
+        ]
+    )
+    mock_session.run.return_value.single.return_value = mock_record
+
+    retriever = GraphRetriever()
+
+    # 1. Incoming direction
+    retriever.get_entity_neighbors("repo::test", "repo::test::class::Item", direction="incoming", limit=10, offset=0, session=mock_session)
+    query_in = mock_session.run.call_args[0][0]
+    assert "(center)<-[r]-(nbr)" in query_in
+
+    # 2. Outgoing direction
+    retriever.get_entity_neighbors("repo::test", "repo::test::class::Item", direction="outgoing", limit=10, offset=0, session=mock_session)
+    query_out = mock_session.run.call_args[0][0]
+    assert "(center)-[r]->(nbr)" in query_out
+
+    # 3. Both directions
+    res = retriever.get_entity_neighbors("repo::test", "repo::test::class::Item", direction="both", limit=10, offset=0, session=mock_session)
+    query_both = mock_session.run.call_args[0][0]
+    assert "(center)-[r]-(nbr)" in query_both
+    assert res["repo_exists"] is True
+    assert res["center"].id == "repo::test::class::Item"
+    assert len(res["neighbors"]) == 1
+    assert res["neighbors"][0].id == "repo::test::file::models.py"
+
+
+def test_get_entity_neighbors_missing_repo_and_missing_entity():
+    """Verify get_entity_neighbors distinguishes missing repository from missing entity."""
+    mock_session = MagicMock(spec=Session)
+    retriever = GraphRetriever()
+
+    # 1. Missing repository: repo_exists = False
+    mock_session.run.return_value.single.return_value = Record(
+        [
+            ("repo_exists", False),
+            ("center_props", None),
+            ("center_labels", []),
+            ("total_relationships", 0),
+            ("total_neighbors", 0),
+            ("edges", []),
+            ("neighbor_props", []),
+            ("neighbor_labels", []),
+        ]
+    )
+    res_repo_missing = retriever.get_entity_neighbors("repo::missing", "file::app.py", session=mock_session)
+    assert res_repo_missing["repo_exists"] is False
+    assert res_repo_missing["center"] is None
+
+    # 2. Missing entity: repo_exists = True, center_props = None
+    mock_session.run.return_value.single.return_value = Record(
+        [
+            ("repo_exists", True),
+            ("center_props", None),
+            ("center_labels", []),
+            ("total_relationships", 0),
+            ("total_neighbors", 0),
+            ("edges", []),
+            ("neighbor_props", []),
+            ("neighbor_labels", []),
+        ]
+    )
+    res_entity_missing = retriever.get_entity_neighbors("repo::exists", "file::missing.py", session=mock_session)
+    assert res_entity_missing["repo_exists"] is True
+    assert res_entity_missing["center"] is None
+
+
+
+
+def test_search_entities_cypher_parameters_and_database_bounds():
+    """Verify search_entities Cypher query structure, parameterization, and entity conversion."""
+    mock_session = MagicMock(spec=Session)
+    mock_record = Record(
+        [
+            ("repo_exists", True),
+            ("total_matches", 1),
+            (
+                "entities_props",
+                [
+                    {
+                        "id": "repo::test::func::process_data",
+                        "repo_id": "repo::test",
+                        "name": "process_data",
+                        "qualified_name": "app.process_data",
+                        "file_path": "app.py",
+                        "language": "python",
+                        "start_line": 10,
+                        "end_line": 25,
+                        "start_byte": 100,
+                        "end_byte": 350,
+                    }
+                ],
+            ),
+            ("entities_labels", [["Function"]]),
+        ]
+    )
+    mock_session.run.return_value.single.return_value = mock_record
+
+    retriever = GraphRetriever()
+    res = retriever.search_entities(
+        "repo::test",
+        q="process_data",
+        entity_type="Function",
+        limit=20,
+        offset=5,
+        session=mock_session,
+    )
+
+    query_str = mock_session.run.call_args[0][0]
+    kwargs = mock_session.run.call_args[1]
+
+    # Verify parameterized Cypher semantics
+    assert "OPTIONAL MATCH (r:Repository {id: $repo_id})" in query_str
+    assert "count(n) AS total_matches" in query_str
+    assert "ORDER BY rank ASC" in query_str
+    assert "SKIP $offset" in query_str
+    assert "LIMIT $limit" in query_str
+    assert "toLower(n.name) CONTAINS $q_lower" in query_str
+    assert "toLower(n.path) CONTAINS $q_lower" in query_str
+
+    # Verify parameter dictionary values
+    assert kwargs["repo_id"] == "repo::test"
+    assert kwargs["q_lower"] == "process_data"
+    assert kwargs["type_filter"] == "Function"
+    assert kwargs["limit"] == 20
+    assert kwargs["offset"] == 5
+
+    # Verify result structure
+    assert res["repo_exists"] is True
+    assert res["total_matches"] == 1
+    assert len(res["entities"]) == 1
+    assert res["entities"][0].name == "process_data"
+    assert isinstance(res["entities"][0], Function)
+
+
+def test_search_entities_missing_repo_and_no_matches():
+    """Verify search_entities behavior when repository does not exist or search has no matches."""
+    mock_session = MagicMock(spec=Session)
+    retriever = GraphRetriever()
+
+    # 1. Nonexistent repository: repo_exists = False
+    mock_session.run.return_value.single.return_value = Record(
+        [
+            ("repo_exists", False),
+            ("total_matches", 0),
+            ("entities_props", []),
+            ("entities_labels", []),
+        ]
+    )
+    res_missing_repo = retriever.search_entities("repo::missing", q="anything", session=mock_session)
+    assert res_missing_repo["repo_exists"] is False
+    assert res_missing_repo["total_matches"] == 0
+    assert res_missing_repo["entities"] == []
+
+    # 2. Existing repository, zero matches: repo_exists = True, total_matches = 0
+    mock_session.run.return_value.single.return_value = Record(
+        [
+            ("repo_exists", True),
+            ("total_matches", 0),
+            ("entities_props", []),
+            ("entities_labels", []),
+        ]
+    )
+    res_no_match = retriever.search_entities("repo::exists", q="nonexistent_symbol", session=mock_session)
+    assert res_no_match["repo_exists"] is True
+    assert res_no_match["total_matches"] == 0
+    assert res_no_match["entities"] == []

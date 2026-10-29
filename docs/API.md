@@ -84,7 +84,71 @@ Illustrative response:
 }
 ```
 
-## 5. Dependency Direction
+## 5. Entity Search
+
+``` http
+GET /api/v1/repositories/{repository_id}/entities/search?q={query}&type={type}&limit={limit}&offset={offset}
+```
+
+Purpose:
+- search code entities across a repository by case-insensitive text match;
+- match against verified persisted properties (`name`, `qualified_name`, `path`, `file_path`, `imported_name`, `id`);
+- deterministic relevance ranking (exact match, prefix match, substring match, ID tie-breaker);
+- bounded pagination without reconstructing the full graph.
+
+Illustrative response:
+
+``` json
+{
+  "repository_id": "repo_001",
+  "query": "process_payment",
+  "entities": [
+    {
+      "id": "repo_001:func::payments.py:process_payment",
+      "label": "Function",
+      "name": "process_payment",
+      "type": "Function",
+      "display_name": "process_payment",
+      "properties": {
+        "repo_id": "repo_001",
+        "name": "process_payment",
+        "qualified_name": "payments.process_payment",
+        "file_path": "payments.py",
+        "language": "python",
+        "start_line": 10,
+        "end_line": 30
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "repo_001:func::payments.py:process_payment",
+      "label": "Function",
+      "name": "process_payment",
+      "type": "Function",
+      "display_name": "process_payment",
+      "properties": {
+        "repo_id": "repo_001",
+        "name": "process_payment",
+        "qualified_name": "payments.process_payment",
+        "file_path": "payments.py",
+        "language": "python",
+        "start_line": 10,
+        "end_line": 30
+      }
+    }
+  ],
+  "total_matches": 1,
+  "returned_matches": 1,
+  "has_more": false,
+  "truncated": false,
+  "offset": 0,
+  "limit": 50,
+  "type_filter": null
+}
+```
+
+## 6. Dependency Direction
 
 The API must distinguish:
 
@@ -110,7 +174,7 @@ Impact analysis primarily uses the dependent direction when answering:
 
 > If this entity changes or is removed, what may be affected?
 
-## 6. API Design Rules
+## 7. API Design Rules
 
 -   Use explicit request/response schemas.
 -   Validate repository and entity identifiers.
@@ -121,7 +185,7 @@ Impact analysis primarily uses the dependent direction when answering:
 -   Version the API under `/api/v1`.
 -   Document non-obvious fields.
 
-## 7. Future API Extensions
+## 8. Future API Extensions
 
 Not part of P0: - semantic search; - embeddings; - `/ask`; - GraphRAG; -
 risk scoring; - authentication; - repository history analysis.

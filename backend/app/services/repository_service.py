@@ -20,12 +20,15 @@ from app.db.relationship_persister import (
     relationship_to_properties,
     repo_id_from_entity_id,
 )
-from app.db.schema import init_schema
+from app.db.schema import NodeLabel, init_schema
 from app.graph.impact import ImpactAnalysisError, ImpactAnalyzer
 from app.graph.traversal import GraphTraversalError, TraversalNode, validate_depth
 from app.resolver import resolve_repository
 from app.schemas.repository import (
     AnalysisSummary,
+    EntityChildrenResponse,
+    EntityNeighborsResponse,
+    EntitySearchResponse,
     ImpactedEntityModel,
     NodeModel,
     OverviewMetadata,
@@ -36,6 +39,7 @@ from app.schemas.repository import (
     RepositoryImpactResponse,
     TargetEntityModel,
 )
+from app.ucm.entities import Class, File, Function, Import, Method, Module, Repository
 from app.ucm.model import UnifiedCodeModel
 
 logger = logging.getLogger("atlas_ai.repository_service")
@@ -251,6 +255,147 @@ def traversal_node_to_impacted_model(node: TraversalNode) -> ImpactedEntityModel
         entity_id=entity_id,
         properties=dict(node.properties),
     )
+
+
+def entity_to_node_model(entity: Any) -> NodeModel:
+    """Convert a typed UCM entity into an API NodeModel with documented properties."""
+    if isinstance(entity, Repository):
+        return NodeModel(
+            id=entity.id,
+            label="Repository",
+            name=entity.name,
+            type="Repository",
+            display_name=entity.name,
+            properties={
+                "name": entity.name,
+                "source": entity.source,
+                "created_at": entity.created_at,
+            },
+        )
+    elif isinstance(entity, File):
+        return NodeModel(
+            id=entity.id,
+            label="File",
+            name=entity.path,
+            type="File",
+            display_name=entity.path,
+            properties={
+                "repo_id": entity.repo_id,
+                "path": entity.path,
+                "language": entity.language,
+                "start_line": entity.start_line,
+                "end_line": entity.end_line,
+                "start_byte": entity.start_byte,
+                "end_byte": entity.end_byte,
+            },
+        )
+    elif isinstance(entity, Class):
+        return NodeModel(
+            id=entity.id,
+            label="Class",
+            name=entity.name,
+            type="Class",
+            display_name=entity.name,
+            properties={
+                "repo_id": entity.repo_id,
+                "name": entity.name,
+                "qualified_name": entity.qualified_name,
+                "file_path": entity.file_path,
+                "language": entity.language,
+                "start_line": entity.start_line,
+                "end_line": entity.end_line,
+                "start_byte": entity.start_byte,
+                "end_byte": entity.end_byte,
+                "docstring": entity.docstring,
+            },
+        )
+    elif isinstance(entity, Function):
+        return NodeModel(
+            id=entity.id,
+            label="Function",
+            name=entity.name,
+            type="Function",
+            display_name=entity.name,
+            properties={
+                "repo_id": entity.repo_id,
+                "name": entity.name,
+                "qualified_name": entity.qualified_name,
+                "file_path": entity.file_path,
+                "language": entity.language,
+                "start_line": entity.start_line,
+                "end_line": entity.end_line,
+                "start_byte": entity.start_byte,
+                "end_byte": entity.end_byte,
+                "docstring": entity.docstring,
+            },
+        )
+    elif isinstance(entity, Method):
+        return NodeModel(
+            id=entity.id,
+            label="Method",
+            name=entity.name,
+            type="Method",
+            display_name=entity.name,
+            properties={
+                "repo_id": entity.repo_id,
+                "name": entity.name,
+                "qualified_name": entity.qualified_name,
+                "file_path": entity.file_path,
+                "language": entity.language,
+                "start_line": entity.start_line,
+                "end_line": entity.end_line,
+                "start_byte": entity.start_byte,
+                "end_byte": entity.end_byte,
+                "docstring": entity.docstring,
+            },
+        )
+    elif isinstance(entity, Module):
+        return NodeModel(
+            id=entity.id,
+            label="Module",
+            name=entity.name,
+            type="Module",
+            display_name=entity.name,
+            properties={
+                "repo_id": entity.repo_id,
+                "name": entity.name,
+                "qualified_name": entity.qualified_name,
+                "file_path": entity.file_path,
+            },
+        )
+    elif isinstance(entity, Import):
+        return NodeModel(
+            id=entity.id,
+            label="Import",
+            name=entity.imported_name,
+            type="Import",
+            display_name=entity.imported_name,
+            properties={
+                "repo_id": entity.repo_id,
+                "file_path": entity.file_path,
+                "module_name": entity.module_name,
+                "imported_name": entity.imported_name,
+                "alias": entity.alias,
+                "start_line": entity.start_line,
+                "end_line": entity.end_line,
+                "start_byte": entity.start_byte,
+                "end_byte": entity.end_byte,
+            },
+        )
+    elif isinstance(entity, NodeModel):
+        return entity
+    else:
+        cls_name = getattr(entity, "__class__", type).__name__
+        name = getattr(entity, "name", None) or getattr(entity, "path", None) or str(getattr(entity, "id", "unknown"))
+        props = getattr(entity, "to_dict", lambda: {})() if hasattr(entity, "to_dict") else {}
+        return NodeModel(
+            id=str(getattr(entity, "id", "")),
+            label=cls_name,
+            name=name,
+            type=cls_name,
+            display_name=name,
+            properties=props,
+        )
 
 
 def serialize_ucm_graph(
@@ -822,6 +967,448 @@ class RepositoryService:
             nodes=nodes,
             relationships=rel_models,
             metadata=metadata,
+        )
+
+    def get_entity_children(
+        self,
+        repository_id: str,
+        entity_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        session: Session | None = None,
+    ) -> EntityChildrenResponse:
+        """Retrieve bounded entity children connected via outgoing CONTAINS relationships.
+
+        Args:
+            repository_id: Stable identifier of the repository.
+            entity_id: Stable identifier of the parent entity.
+            limit: Maximum number of children to return (default 50, max 200).
+            offset: Pagination offset for children (default 0).
+            session: Optional caller-managed Neo4j Session for testing.
+
+        Returns:
+            EntityChildrenResponse with parent, children, edges, and pagination metadata.
+
+        Raises:
+            HTTPException:
+                400: If repository_id or entity_id is malformed or limit/offset is out of bounds.
+                404: If repository is not found, or entity is not found in repository.
+                503: If Neo4j database is unreachable.
+                500: If retrieval fails with an internal error.
+        """
+        clean_repo_id = validate_repository_id(repository_id)
+        clean_entity_id = validate_entity_id(entity_id)
+
+        if limit < 1:
+            raise HTTPException(status_code=400, detail="Limit must be >= 1")
+        if limit > 200:
+            raise HTTPException(status_code=400, detail="Children limit cannot exceed 200")
+        if offset < 0:
+            raise HTTPException(status_code=400, detail="Offset must be >= 0")
+
+        # Acquire database driver if session is not explicitly provided
+        active_driver = self.driver
+        if active_driver is None and session is None:
+            try:
+                active_driver = self._get_driver()
+            except Neo4jConnectionError:
+                raise HTTPException(status_code=503, detail="Database service unavailable") from None
+
+        try:
+            retriever = GraphRetriever(driver=active_driver)
+            result = retriever.get_entity_children(
+                repo_id=clean_repo_id,
+                entity_id=clean_entity_id,
+                limit=limit,
+                offset=offset,
+                session=session,
+            )
+        except Neo4jConnectionError:
+            raise HTTPException(status_code=503, detail="Database service unavailable") from None
+        except Exception as exc:
+            logger.error(
+                "Failed to retrieve children for '%s' in '%s': %s",
+                clean_entity_id,
+                clean_repo_id,
+                type(exc).__name__,
+                exc_info=True,
+            )
+            raise HTTPException(status_code=500, detail="Failed to retrieve entity children") from None
+
+        if not result["repo_exists"]:
+            raise HTTPException(status_code=404, detail=f"Repository '{clean_repo_id}' not found")
+
+        if result["parent"] is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Entity '{clean_entity_id}' not found in repository '{clean_repo_id}'",
+            )
+
+        parent_entity = result["parent"]
+        parent_node = entity_to_node_model(parent_entity)
+
+        child_nodes: list[NodeModel] = []
+        for child_entity in result["children"]:
+            child_nodes.append(entity_to_node_model(child_entity))
+
+        # Enforce endpoint presence invariant: every edge must connect returned nodes
+        valid_node_ids = {parent_node.id} | {c.id for c in child_nodes}
+        rel_models: list[RelationshipModel] = []
+        seen_edge_ids: set[str] = set()
+
+        for edge_data in result["edges"]:
+            source_id = edge_data["source_id"]
+            target_id = edge_data["target_id"]
+            if source_id not in valid_node_ids or target_id not in valid_node_ids:
+                continue
+
+            rel_type = edge_data.get("rel_type") or "CONTAINS"
+            edge_id = f"{source_id}->{rel_type}->{target_id}"
+            if edge_id in seen_edge_ids:
+                continue
+            seen_edge_ids.add(edge_id)
+
+            rel_models.append(
+                RelationshipModel(
+                    id=edge_id,
+                    source=source_id,
+                    target=target_id,
+                    type=rel_type,
+                    source_id=source_id,
+                    target_id=target_id,
+                    rel_type=rel_type,
+                    properties=dict(edge_data.get("properties") or {}),
+                    metadata={},
+                )
+            )
+
+        # Deterministic sort for relationships: (source, type, target, id)
+        rel_models.sort(key=lambda r: (r.source, r.type, r.target, r.id))
+
+        total_children = result["total_children"]
+        returned_children = len(child_nodes)
+        has_more = (offset + returned_children) < total_children
+        truncated = total_children > returned_children
+
+        return EntityChildrenResponse(
+            repository_id=clean_repo_id,
+            parent_id=clean_entity_id,
+            parent=parent_node,
+            children=child_nodes,
+            relationships=rel_models,
+            total_children=total_children,
+            returned_children=returned_children,
+            has_more=has_more,
+            truncated=truncated,
+            offset=offset,
+            limit=limit,
+        )
+
+    def get_entity_neighbors(
+        self,
+        repository_id: str,
+        entity_id: str,
+        direction: str = "both",
+        types: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        session: Session | None = None,
+    ) -> EntityNeighborsResponse:
+        """Retrieve bounded entity neighbors and incident relationships.
+
+        Args:
+            repository_id: Stable identifier of the repository.
+            entity_id: Stable identifier of the target center entity.
+            direction: Direction filter ('incoming', 'outgoing', 'both'). Default 'both'.
+            types: Optional comma-separated relationship types to include ('CONTAINS,CALLS').
+            limit: Maximum number of relationships to return (default 50, max 200).
+            offset: Pagination offset for relationships (default 0).
+            session: Optional caller-managed Neo4j Session for testing.
+
+        Returns:
+            EntityNeighborsResponse with center, neighbors, relationships, and pagination metadata.
+
+        Raises:
+            HTTPException:
+                400: If repository_id, entity_id, direction, or types is invalid, or limit/offset is out of bounds.
+                404: If repository is not found, or entity is not found in repository.
+                503: If Neo4j database is unreachable.
+                500: If retrieval fails with an internal error.
+        """
+        clean_repo_id = validate_repository_id(repository_id)
+        clean_entity_id = validate_entity_id(entity_id)
+
+        clean_direction = direction.strip().lower() if isinstance(direction, str) else "both"
+        if clean_direction not in ("incoming", "outgoing", "both"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid direction '{direction}'. Must be 'incoming', 'outgoing', or 'both'",
+            )
+
+        allowed_types = ["CONTAINS", "IMPORTS", "CALLS", "INHERITS"]
+        parsed_types = None
+        if types is not None:
+            parsed_types = []
+            for t in types.split(","):
+                t_clean = t.strip().upper()
+                if not t_clean:
+                    continue
+                if t_clean not in allowed_types:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid relationship type '{t_clean}'. Allowed types: {', '.join(allowed_types)}",
+                    )
+                if t_clean not in parsed_types:
+                    parsed_types.append(t_clean)
+            if not parsed_types:
+                parsed_types = allowed_types
+
+        if limit < 1:
+            raise HTTPException(status_code=400, detail="Limit must be >= 1")
+        if limit > 200:
+            raise HTTPException(status_code=400, detail="Neighbors limit cannot exceed 200")
+        if offset < 0:
+            raise HTTPException(status_code=400, detail="Offset must be >= 0")
+
+        # Acquire database driver if session is not explicitly provided
+        active_driver = self.driver
+        if active_driver is None and session is None:
+            try:
+                active_driver = self._get_driver()
+            except Neo4jConnectionError:
+                raise HTTPException(status_code=503, detail="Database service unavailable") from None
+
+        try:
+            retriever = GraphRetriever(driver=active_driver)
+            result = retriever.get_entity_neighbors(
+                repo_id=clean_repo_id,
+                entity_id=clean_entity_id,
+                direction=clean_direction,
+                types=parsed_types,
+                limit=limit,
+                offset=offset,
+                session=session,
+            )
+        except Neo4jConnectionError:
+            raise HTTPException(status_code=503, detail="Database service unavailable") from None
+        except Exception as exc:
+            logger.error(
+                "Failed to retrieve neighbors for '%s' in '%s': %s",
+                clean_entity_id,
+                clean_repo_id,
+                type(exc).__name__,
+                exc_info=True,
+            )
+            raise HTTPException(status_code=500, detail="Failed to retrieve entity neighbors") from None
+
+        if not result["repo_exists"]:
+            raise HTTPException(status_code=404, detail=f"Repository '{clean_repo_id}' not found")
+
+        if result["center"] is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Entity '{clean_entity_id}' not found in repository '{clean_repo_id}'",
+            )
+
+        center_entity = result["center"]
+        center_node = entity_to_node_model(center_entity)
+
+        # Convert distinct neighbor entities
+        seen_nbr_ids: set[str] = set()
+        neighbor_nodes: list[NodeModel] = []
+        for nbr_entity in result["neighbors"]:
+            nbr_node = entity_to_node_model(nbr_entity)
+            if nbr_node.id not in seen_nbr_ids and nbr_node.id != center_node.id:
+                seen_nbr_ids.add(nbr_node.id)
+                neighbor_nodes.append(nbr_node)
+
+        # Sort neighbor nodes deterministically by ID
+        neighbor_nodes.sort(key=lambda n: n.id)
+
+        # Enforce endpoint presence invariant: every returned relationship connects nodes in {center} | {neighbors}
+        valid_node_ids = {center_node.id} | {n.id for n in neighbor_nodes}
+        rel_models: list[RelationshipModel] = []
+        seen_edge_ids: dict[str, int] = {}
+
+        for edge_data in result["edges"]:
+            source_id = edge_data["source_id"]
+            target_id = edge_data["target_id"]
+            if source_id not in valid_node_ids or target_id not in valid_node_ids:
+                continue
+
+            rel_type = edge_data.get("rel_type") or "CONTAINS"
+            base_edge_id = f"{source_id}->{rel_type}->{target_id}"
+            props = dict(edge_data.get("properties") or {})
+            if "start_line" in props:
+                base_edge_id = f"{base_edge_id}:L{props['start_line']}"
+
+            count = seen_edge_ids.get(base_edge_id, 0)
+            seen_edge_ids[base_edge_id] = count + 1
+            edge_id = base_edge_id if count == 0 else f"{base_edge_id}#{count}"
+
+            rel_models.append(
+                RelationshipModel(
+                    id=edge_id,
+                    source=source_id,
+                    target=target_id,
+                    type=rel_type,
+                    source_id=source_id,
+                    target_id=target_id,
+                    rel_type=rel_type,
+                    properties=props,
+                    metadata={},
+                )
+            )
+
+        # Deterministic sort for relationships: (source, type, target, id)
+        rel_models.sort(key=lambda r: (r.source, r.type, r.target, r.id))
+
+        total_relationships = result["total_relationships"]
+        returned_relationships = len(rel_models)
+        total_neighbors = result["total_neighbors"]
+        returned_neighbors = len(neighbor_nodes)
+        has_more = (offset + returned_relationships) < total_relationships
+        truncated = total_relationships > returned_relationships
+
+        return EntityNeighborsResponse(
+            repository_id=clean_repo_id,
+            entity_id=clean_entity_id,
+            center=center_node,
+            neighbors=neighbor_nodes,
+            relationships=rel_models,
+            total_relationships=total_relationships,
+            returned_relationships=returned_relationships,
+            total_neighbors=total_neighbors,
+            returned_neighbors=returned_neighbors,
+            direction=clean_direction,
+            has_more=has_more,
+            truncated=truncated,
+            offset=offset,
+            limit=limit,
+        )
+
+    def search_entities(
+        self,
+        repository_id: str,
+        q: str,
+        entity_type: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        session: Session | None = None,
+    ) -> EntitySearchResponse:
+        """Search code entities within a repository by case-insensitive text match.
+
+        Matches against verified persisted properties:
+        - entity name (Module, Class, Function, Method, Repository)
+        - qualified name (Module, Class, Function, Method)
+        - path (File)
+        - file path (Module, Class, Function, Method, Import)
+        - imported name (Import)
+        - entity id (all types)
+
+        Special characters and wildcards (*, ?, %, _) in `q` are evaluated strictly as literal
+        substrings using parameterized Cypher CONTAINS and STARTS WITH clauses, completely
+        preventing regex injection or glob expansion.
+
+        Args:
+            repository_id: Stable identifier of the repository.
+            q: Non-empty search query string (max 100 characters).
+            entity_type: Optional entity type/label filter (e.g. 'Class', 'Function', 'File').
+            limit: Maximum number of entities to return (default 50, max 200).
+            offset: Pagination offset (default 0).
+            session: Optional caller-managed Neo4j Session for testing.
+
+        Returns:
+            EntitySearchResponse containing matching entity NodeModels and pagination metadata.
+
+        Raises:
+            HTTPException:
+                400: If repository_id or q is empty/invalid, entity_type is unsupported, or limit/offset is out of bounds.
+                404: If repository is not found.
+                422: If query length exceeds 100 characters.
+                503: If Neo4j database is unreachable.
+                500: If retrieval fails with an internal error.
+        """
+        clean_repo_id = validate_repository_id(repository_id)
+
+        if not isinstance(q, str) or not q.strip():
+            raise HTTPException(status_code=400, detail="Search query 'q' cannot be empty")
+
+        clean_q = q.strip()
+        if len(clean_q) > 100:
+            raise HTTPException(status_code=422, detail="Search query cannot exceed 100 characters")
+
+        clean_type: str | None = None
+        if entity_type is not None:
+            type_str = entity_type.strip()
+            if type_str:
+                valid_labels = {lbl.value.lower(): lbl.value for lbl in NodeLabel}
+                if type_str.lower() not in valid_labels:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Unsupported entity type filter: '{entity_type}'",
+                    )
+                clean_type = valid_labels[type_str.lower()]
+
+        if limit < 1:
+            raise HTTPException(status_code=400, detail="Limit must be >= 1")
+        if limit > 200:
+            raise HTTPException(status_code=400, detail="Search limit cannot exceed 200")
+        if offset < 0:
+            raise HTTPException(status_code=400, detail="Offset must be >= 0")
+
+        # Acquire database driver if session is not explicitly provided
+        active_driver = self.driver
+        if active_driver is None and session is None:
+            try:
+                active_driver = self._get_driver()
+            except Neo4jConnectionError:
+                raise HTTPException(status_code=503, detail="Database service unavailable") from None
+
+        try:
+            retriever = GraphRetriever(driver=active_driver)
+            result = retriever.search_entities(
+                repo_id=clean_repo_id,
+                q=clean_q,
+                entity_type=clean_type,
+                limit=limit,
+                offset=offset,
+                session=session,
+            )
+        except Neo4jConnectionError:
+            raise HTTPException(status_code=503, detail="Database service unavailable") from None
+        except Exception as exc:
+            logger.error(
+                "Failed to search entities in '%s' for '%s': %s",
+                clean_repo_id,
+                clean_q,
+                type(exc).__name__,
+                exc_info=True,
+            )
+            raise HTTPException(status_code=500, detail="Failed to search entities") from None
+
+        if not result["repo_exists"]:
+            raise HTTPException(status_code=404, detail=f"Repository '{clean_repo_id}' not found")
+
+        entity_nodes: list[NodeModel] = [entity_to_node_model(ent) for ent in result["entities"]]
+
+        total_matches = result["total_matches"]
+        returned_matches = len(entity_nodes)
+        has_more = (offset + returned_matches) < total_matches
+        truncated = total_matches > returned_matches
+
+        return EntitySearchResponse(
+            repository_id=clean_repo_id,
+            query=clean_q,
+            entities=entity_nodes,
+            results=entity_nodes,
+            total_matches=total_matches,
+            returned_matches=returned_matches,
+            has_more=has_more,
+            truncated=truncated,
+            offset=offset,
+            limit=limit,
+            type_filter=clean_type,
         )
 
     def analyze_impact(
