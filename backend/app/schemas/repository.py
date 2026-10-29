@@ -83,6 +83,20 @@ class RelationshipModel(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional relationship metadata")
 
 
+class OverviewMetadata(BaseModel):
+    """Pagination and truncation metadata accompanying bounded repository overview responses."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    view: str = Field(default="overview", description="Active graph view name ('overview')")
+    total_files: int = Field(..., description="Total count of files in the repository")
+    returned_files: int = Field(..., description="Count of files included in this response page")
+    has_more: bool = Field(..., description="Whether more file pages are available")
+    truncated: bool = Field(..., description="Whether the file collection is truncated")
+    offset: int = Field(..., description="Pagination offset applied")
+    limit: int = Field(..., description="Pagination limit applied")
+
+
 class RepositoryGraphResponse(BaseModel):
     """Response payload for GET /api/v1/repositories/{repository_id}/graph."""
 
@@ -91,6 +105,76 @@ class RepositoryGraphResponse(BaseModel):
     repository_id: str = Field(..., description="Deterministic repository identifier")
     nodes: list[NodeModel] = Field(default_factory=list, description="List of graph nodes")
     relationships: list[RelationshipModel] = Field(default_factory=list, description="List of graph relationship edges")
+    metadata: OverviewMetadata | None = Field(default=None, description="Overview pagination and truncation metadata")
+
+
+class EntityChildrenResponse(BaseModel):
+    """Response payload for GET /api/v1/repositories/{repository_id}/entities/{entity_id}/children."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    repository_id: str = Field(..., description="Deterministic repository identifier")
+    parent_id: str = Field(..., description="Stable unique identifier of the parent entity")
+    parent: NodeModel = Field(..., description="Serialized parent node")
+    children: list[NodeModel] = Field(default_factory=list, description="Direct children nodes")
+    relationships: list[RelationshipModel] = Field(default_factory=list, description="Connecting CONTAINS relationships")
+    total_children: int = Field(..., description="Total count of direct children in repository")
+    returned_children: int = Field(..., description="Count of children included in this page")
+    has_more: bool = Field(..., description="Whether additional children pages are available")
+    truncated: bool = Field(..., description="Whether the children collection is truncated")
+    offset: int = Field(..., description="Pagination offset applied")
+    limit: int = Field(..., description="Pagination limit applied")
+
+
+class EntityNeighborsResponse(BaseModel):
+    """Response payload for GET /api/v1/repositories/{repository_id}/entities/{entity_id}/neighbors."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    repository_id: str = Field(..., description="Deterministic repository identifier")
+    entity_id: str = Field(..., description="Stable unique identifier of the target center entity")
+    center: NodeModel = Field(..., description="Serialized center node")
+    neighbors: list[NodeModel] = Field(default_factory=list, description="Distinct neighboring entity nodes")
+    relationships: list[RelationshipModel] = Field(default_factory=list, description="Incident relationship edges")
+    total_relationships: int = Field(..., description="Total count of matching incident relationships")
+    returned_relationships: int = Field(..., description="Count of relationship edges in this page")
+    total_neighbors: int = Field(..., description="Total count of distinct neighboring entities")
+    returned_neighbors: int = Field(..., description="Count of distinct neighboring entities in this page")
+    direction: str = Field(..., description="Relationship direction filter ('incoming', 'outgoing', 'both')")
+    has_more: bool = Field(..., description="Whether additional relationship pages are available")
+    truncated: bool = Field(..., description="Whether the relationship collection is truncated")
+    offset: int = Field(..., description="Pagination offset applied")
+    limit: int = Field(..., description="Pagination limit applied")
+
+
+class EntitySearchResponse(BaseModel):
+    """Response payload for GET /api/v1/repositories/{repository_id}/entities/search."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    repository_id: str = Field(..., description="Deterministic repository identifier")
+    query: str = Field(..., description="Active search query string")
+    entities: list[NodeModel] = Field(default_factory=list, description="Matching entity nodes")
+    results: list[NodeModel] = Field(default_factory=list, description="Alias matching entities")
+    total_matches: int = Field(..., description="Total count of matching entities in repository")
+    returned_matches: int = Field(..., description="Count of matching entities returned in this page")
+    has_more: bool = Field(..., description="Whether additional result pages are available")
+    truncated: bool = Field(..., description="Whether the result collection is truncated")
+    offset: int = Field(..., description="Pagination offset applied")
+    limit: int = Field(..., description="Pagination limit applied")
+    type_filter: str | None = Field(default=None, description="Optional entity type filter applied")
+
+    @model_validator(mode="before")
+    @classmethod
+    def sync_entities_and_results(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            ents = data.get("entities")
+            res = data.get("results")
+            if ents is not None and res is None:
+                data["results"] = ents
+            elif res is not None and ents is None:
+                data["entities"] = res
+        return data
 
 
 class TargetEntityModel(BaseModel):
