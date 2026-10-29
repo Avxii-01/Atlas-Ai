@@ -13,8 +13,12 @@ import {
   isKnownLeafType,
   extractEntityShortName,
   type NodeChildrenResponse,
+  mergeNeighborData,
+  fetchEntityChildrenAdapter,
 } from "../lib/progressiveExploration.ts";
+import type { EntityChildrenResponse } from "../lib/types.ts";
 import { searchGraphNodes } from "../lib/graphSearch.ts";
+import { searchRepositoryEntities } from "../lib/api.ts";
 import { getEntityBadgeStyle, getRelationshipEdgeStyle } from "../lib/graphTokens.ts";
 
 // Base fixture nodes simulating an initial repository graph slice
@@ -887,3 +891,219 @@ describe("Progressive Exploration - Real Backend 'repo::atlas_fixture' Hierarchy
   });
 });
 
+describe("Progressive Exploration - Backend EntityChildrenResponse & Neighbor Integration (Step 6)", () => {
+  it("merges backend EntityChildrenResponse using children property correctly", () => {
+    const parentNode = baseFixtureNodes[0];
+    const backendChildrenPayload: EntityChildrenResponse = {
+      repository_id: "test_repo",
+      parent_id: parentNode.id,
+      parent: { id: parentNode.id, label: "File", name: "app.py", type: "file" },
+      children: [
+        { id: "child:class:1", label: "Class", name: "AppClass", type: "class" },
+        { id: "child:fn:2", label: "Function", name: "app_fn", type: "function" },
+      ],
+      relationships: [
+        {
+          id: "rel:contains:app->AppClass",
+          source: parentNode.id,
+          target: "child:class:1",
+          type: "CONTAINS",
+        },
+        {
+          id: "rel:contains:app->app_fn",
+          source: parentNode.id,
+          target: "child:fn:2",
+          type: "CONTAINS",
+        },
+      ],
+      total_children: 2,
+      returned_children: 2,
+      has_more: false,
+      truncated: false,
+      offset: 0,
+      limit: 50,
+    };
+
+    const { mergedNodes, mergedEdges, addedNodeIds } = mergeGraphData(
+      baseFixtureNodes,
+      baseFixtureEdges,
+      parentNode,
+      backendChildrenPayload.children,
+      backendChildrenPayload.relationships
+    );
+
+    assert.equal(addedNodeIds.length, 2);
+    assert.equal(mergedNodes.length, baseFixtureNodes.length + 2);
+    assert.equal(mergedEdges.length, baseFixtureEdges.length + 2);
+
+    const addedAppClass = mergedNodes.find((n) => n.id === "child:class:1");
+    assert.ok(addedAppClass);
+    assert.equal(addedAppClass.data.name, "AppClass");
+  });
+
+  it("merges neighbor entities and relationships via mergeNeighborData without drift", () => {
+    const centerNode = baseFixtureNodes[0];
+    const neighbors: GraphNodeModel[] = [
+      { id: "neighbor:util", label: "File", name: "util.py", type: "file" },
+    ];
+    const neighborEdges: GraphRelationshipModel[] = [
+      {
+        id: "rel:imports:app->util",
+        source: centerNode.id,
+        target: "neighbor:util",
+        type: "IMPORTS",
+      },
+    ];
+
+    const { mergedNodes, mergedEdges, addedNodeIds } = mergeNeighborData(
+      baseFixtureNodes,
+      baseFixtureEdges,
+      centerNode,
+      neighbors,
+      neighborEdges
+    );
+
+    assert.equal(addedNodeIds.length, 1);
+    assert.equal(mergedNodes.length, baseFixtureNodes.length + 1);
+    assert.equal(mergedEdges.length, baseFixtureEdges.length + 1);
+
+    const neighborNode = mergedNodes.find((n) => n.id === "neighbor:util");
+    assert.ok(neighborNode);
+    // Center node coordinates untouched
+    assert.equal(centerNode.position.x, 340);
+    assert.equal(centerNode.position.y, 100);
+  });
+
+  it("handles overlapping expansion results and duplicate edges without mutating existing node coordinates", () => {
+    const parentNode = baseFixtureNodes[0];
+    // First expansion adds child:1 and child:2
+    const firstExpansion: GraphNodeModel[] = [
+      { id: "child:shared:1", label: "Class", name: "SharedClass", type: "class" },
+      { id: "child:unique:1", label: "Function", name: "uniqueFn1", type: "function" },
+    ];
+    const firstEdges: GraphRelationshipModel[] = [
+      { id: "e:1", source: parentNode.id, target: "child:shared:1", type: "CONTAINS" },
+      { id: "e:2", source: parentNode.id, target: "child:unique:1", type: "CONTAINS" },
+    ];
+
+    const step1 = mergeGraphData(baseFixtureNodes, baseFixtureEdges, parentNode, firstExpansion, firstEdges);
+    assert.equal(step1.addedNodeIds.length, 2);
+    const sharedNodePosBefore = step1.mergedNodes.find((n) => n.id === "child:shared:1")!.position;
+
+    // Second expansion (e.g. from another parent or overlapping response) re-includes child:shared:1 plus a new child:unique:2
+    const otherParent = baseFixtureNodes[1];
+    const secondExpansion: GraphNodeModel[] = [
+      { id: "child:shared:1", label: "Class", name: "SharedClass", type: "class" }, // ALREADY PRESENT
+      { id: "child:unique:2", label: "Function", name: "uniqueFn2", type: "function" }, // NEW
+    ];
+    const secondEdges: GraphRelationshipModel[] = [
+      { id: "e:1", source: parentNode.id, target: "child:shared:1", type: "CONTAINS" }, // DUPLICATE EDGE ID
+      { id: "e:3", source: otherParent.id, target: "child:unique:2", type: "CONTAINS" },
+    ];
+
+    const step2 = mergeGraphData(step1.mergedNodes, step1.mergedEdges, otherParent, secondExpansion, secondEdges);
+
+    // Only 1 truly new node should be added
+    assert.equal(step2.addedNodeIds.length, 1);
+    assert.equal(step2.addedNodeIds[0], "child:unique:2");
+    assert.equal(step2.mergedNodes.length, step1.mergedNodes.length + 1);
+
+    // Existing shared node position was strictly preserved
+    const sharedNodePosAfter = step2.mergedNodes.find((n) => n.id === "child:shared:1")!.position;
+    assert.equal(sharedNodePosAfter.x, sharedNodePosBefore.x);
+    assert.equal(sharedNodePosAfter.y, sharedNodePosBefore.y);
+
+    // Duplicate edge e:1 was not duplicated
+    const e1Count = step2.mergedEdges.filter((e) => e.id === "e:1").length;
+    assert.equal(e1Count, 1);
+  });
+
+  it("searchRepositoryEntities can locate an entity across the repository not already loaded on canvas", async () => {
+    // Current canvas only contains baseFixtureNodes (app.py and core.py)
+    const canvasEntityIds = new Set(baseFixtureNodes.map((n) => n.id));
+    assert.ok(!canvasEntityIds.has("repo:test::function::deep_calculator"));
+
+    // In-memory search on canvas nodes returns 0 results
+    assert.equal(searchGraphNodes(baseFixtureNodes, "deep_calculator").length, 0);
+
+    // Repository search queries backend and successfully locates the unrevealed entity
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      return new Response(
+        JSON.stringify({
+          repository_id: "test_repo",
+          query: "deep_calculator",
+          entities: [
+            {
+              id: "repo:test::function::deep_calculator",
+              label: "Function",
+              name: "deep_calculator",
+              type: "Function",
+              display_name: "deep_calculator()",
+              properties: { file_path: "math/calc.py" },
+            },
+          ],
+          results: [
+            {
+              id: "repo:test::function::deep_calculator",
+              label: "Function",
+              name: "deep_calculator",
+              type: "Function",
+              display_name: "deep_calculator()",
+              properties: { file_path: "math/calc.py" },
+            },
+          ],
+          total_matches: 1,
+          returned_matches: 1,
+          has_more: false,
+          truncated: false,
+          offset: 0,
+          limit: 50,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    try {
+      const searchRes = await searchRepositoryEntities("test_repo", "deep_calculator");
+      assert.equal(searchRes.total_matches, 1);
+      assert.equal(searchRes.entities[0].id, "repo:test::function::deep_calculator");
+      // Confirmed: entity found via repository search is not present in canvas nodes
+      assert.ok(!canvasEntityIds.has(searchRes.entities[0].id));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("fetchEntityChildrenAdapter passes parameters to getEntityChildren and returns EntityChildrenResponse", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      return new Response(
+        JSON.stringify({
+          repository_id: "test_repo",
+          parent_id: "p_1",
+          parent: { id: "p_1", label: "File", name: "f.py", type: "File" },
+          children: [{ id: "c_1", label: "Class", name: "C1", type: "Class" }],
+          relationships: [{ id: "r_1", source: "p_1", target: "c_1", type: "CONTAINS" }],
+          total_children: 1,
+          returned_children: 1,
+          has_more: false,
+          truncated: false,
+          offset: 0,
+          limit: 50,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    try {
+      const res = await fetchEntityChildrenAdapter("test_repo", "p_1");
+      assert.equal(res.parent_id, "p_1");
+      assert.equal(res.children.length, 1);
+      assert.equal(res.children[0].name, "C1");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+});
