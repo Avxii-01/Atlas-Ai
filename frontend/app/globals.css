@@ -1034,7 +1034,8 @@ body {
 .entity-node-header {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 
 .entity-type-badge {
@@ -1553,4 +1554,469 @@ body {
     border-left: none;
     border-top: 1px solid var(--border-subtle);
   }
+}
+
+/* ==============================================================================
+   Graph Legend Component Styles (Checkpoint 2)
+   ============================================================================== */
+
+.graph-legend-container {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+  z-index: 10;
+  pointer-events: auto;
+  user-select: none;
+}
+
+.btn-legend-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+.btn-legend-toggle:hover {
+  color: var(--text-primary);
+  background: rgba(30, 41, 59, 0.95);
+  border-color: var(--border-accent);
+}
+
+.btn-legend-toggle:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+  color: var(--text-primary);
+}
+
+.legend-toggle-icon {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+}
+
+.graph-legend-card {
+  width: 21rem;
+  max-width: calc(100vw - 2.5rem);
+  max-height: 24rem;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.65rem;
+  padding: 0.85rem 1rem;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  overflow-y: auto;
+}
+
+.legend-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.45rem;
+}
+
+.legend-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-primary);
+}
+
+.legend-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0.2rem 0.35rem;
+  border-radius: 0.25rem;
+  line-height: 1;
+  transition: color 0.15s ease;
+}
+
+.legend-close-btn:hover {
+  color: var(--text-primary);
+}
+
+.legend-close-btn:focus-visible {
+  outline: 2px solid var(--accent-primary);
+}
+
+.legend-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.legend-section-title {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.legend-items-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.legend-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+}
+
+.legend-item-left {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 6.5rem;
+}
+
+.legend-item-desc {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.legend-edge-sample {
+  display: flex;
+  align-items: center;
+  min-width: 2rem;
+  height: 0.75rem;
+}
+
+.legend-edge-line {
+  height: 2px;
+  width: 1.35rem;
+  border-radius: 1px;
+}
+
+.legend-edge-arrow {
+  width: 0;
+  height: 0;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  border-left: 5px solid;
+}
+
+.legend-edge-name {
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-family: monospace;
+  letter-spacing: 0.02em;
+}
+
+
+/* ==============================================================================
+   Local In-Memory Graph Search Component Styles (Checkpoint 3)
+   ============================================================================== */
+
+.graph-search-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.graph-search-input-wrapper {
+  display: flex;
+  align-items: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.375rem;
+  padding: 0.2rem 0.6rem;
+  gap: 0.4rem;
+  transition: all 0.15s ease;
+  width: 14rem;
+}
+
+.graph-search-input-wrapper:focus-within {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+  background: rgba(15, 23, 42, 0.95);
+  width: 16rem;
+}
+
+.search-icon {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.graph-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 0.775rem;
+  min-width: 0;
+}
+
+.graph-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.btn-search-clear {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0 0.2rem;
+  line-height: 1;
+  border-radius: 0.2rem;
+  transition: color 0.15s ease;
+}
+
+.btn-search-clear:hover {
+  color: var(--text-primary);
+}
+
+.btn-search-clear:focus-visible {
+  outline: 2px solid var(--accent-primary);
+}
+
+.graph-search-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 23rem;
+  max-width: calc(100vw - 2rem);
+  max-height: 22rem;
+  background: rgba(15, 23, 42, 0.96);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.5rem;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.6);
+  z-index: 50;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.graph-search-results-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.graph-search-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.35rem;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+  border: 1px solid transparent;
+}
+
+.graph-search-item:hover,
+.graph-search-item.highlighted {
+  background-color: rgba(99, 102, 241, 0.16);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+.search-item-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.entity-type-badge-sm {
+  font-size: 0.625rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.25rem;
+  border: 1px solid;
+  flex-shrink: 0;
+}
+
+.search-item-name {
+  font-size: 0.775rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-item-meta {
+  flex-shrink: 0;
+  max-width: 9rem;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-item-path,
+.search-item-id {
+  font-size: 0.68rem;
+  font-family: monospace;
+  color: var(--text-muted);
+}
+
+.graph-search-empty-state {
+  padding: 1.25rem 1rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.empty-state-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.empty-state-desc {
+  font-size: 0.725rem;
+  color: var(--text-secondary);
+}
+
+.empty-state-desc strong {
+  color: #a5b4fc;
+}
+
+.empty-state-hint {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+
+/* ==============================================================================
+   Progressive Exploration Node Controls (Checkpoint 4)
+   ============================================================================== */
+
+.btn-node-expand {
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.btn-node-expand:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.3);
+  color: #ffffff;
+  border-color: #6366f1;
+}
+
+.btn-node-expand:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+
+.btn-node-expand.expanded {
+  background: rgba(99, 102, 241, 0.22);
+  color: #a5b4fc;
+  border-color: rgba(99, 102, 241, 0.45);
+}
+
+.btn-node-expand.empty {
+  opacity: 0.4;
+  cursor: default;
+  border-color: transparent;
+  background: transparent;
+}
+
+.expand-spinner {
+  width: 0.6rem;
+  height: 0.6rem;
+  border: 1.5px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #a5b4fc;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+.entity-node-expanded {
+  border-color: rgba(99, 102, 241, 0.5) !important;
+}
+
+
+/* Progressive Exploration Error Toast */
+.graph-expansion-error-banner {
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(239, 68, 68, 0.95);
+  backdrop-filter: blur(8px);
+  color: #ffffff;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  z-index: 40;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  font-size: 0.75rem;
+}
+
+.expansion-error-message code {
+  font-family: monospace;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.2rem;
+}
+
+.btn-close-toast {
+  background: none;
+  border: none;
+  color: #ffffff;
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.8rem;
+  opacity: 0.8;
+  line-height: 1;
+}
+
+.btn-close-toast:hover {
+  opacity: 1;
 }

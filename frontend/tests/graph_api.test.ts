@@ -265,4 +265,89 @@ describe("Graph API Client - getRepositoryGraph (P0-22)", () => {
       restoreFetch();
     }
   });
+
+  it("supports request cancellation via AbortSignal in options object", async () => {
+    const controller = new AbortController();
+
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const signal = init?.signal;
+      if (signal?.aborted) {
+        throw new DOMException("The user aborted a request.", "AbortError");
+      }
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => {
+          reject(new DOMException("The user aborted a request.", "AbortError"));
+        });
+      });
+    }) as typeof fetch;
+
+    try {
+      const promise = getRepositoryGraph("test_repo", { signal: controller.signal });
+      controller.abort();
+
+      await assert.rejects(
+        promise,
+        (err: unknown) => {
+          assert.ok(err instanceof ApiClientError);
+          assert.equal(err.code, "ABORTED");
+          assert.equal(err.status, 0);
+          assert.ok(err.message.includes("cancelled"));
+          return true;
+        }
+      );
+    } finally {
+      restoreFetch();
+    }
+  });
+
+  it("supports request cancellation via AbortSignal when numeric limit is also provided", async () => {
+    const controller = new AbortController();
+
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const signal = init?.signal;
+      if (signal?.aborted) {
+        throw new DOMException("The user aborted a request.", "AbortError");
+      }
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => {
+          reject(new DOMException("The user aborted a request.", "AbortError"));
+        });
+      });
+    }) as typeof fetch;
+
+    try {
+      const promise = getRepositoryGraph("test_repo", 50, { signal: controller.signal });
+      controller.abort();
+
+      await assert.rejects(
+        promise,
+        (err: unknown) => {
+          assert.ok(err instanceof ApiClientError);
+          assert.equal(err.code, "ABORTED");
+          return true;
+        }
+      );
+    } finally {
+      restoreFetch();
+    }
+  });
+
+  it("preserves limit when passed in options object", async () => {
+    let capturedUrl = "";
+
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      capturedUrl = url.toString();
+      return new Response(JSON.stringify(sampleGraphResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    try {
+      await getRepositoryGraph("test_repo", { limit: 25 });
+      assert.ok(capturedUrl.includes("/graph?limit=25"));
+    } finally {
+      restoreFetch();
+    }
+  });
 });
