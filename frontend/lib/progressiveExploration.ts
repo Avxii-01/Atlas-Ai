@@ -8,7 +8,8 @@
  */
 
 import { MarkerType, type Node, type Edge } from "@xyflow/react";
-import type { GraphNodeModel, GraphRelationshipModel } from "./types.ts";
+import type { GraphNodeModel, GraphRelationshipModel, EntityChildrenResponse } from "./types.ts";
+import { getEntityChildren } from "./api.ts";
 import { getNodeDisplayLabel, type EntityNodeData } from "./graphMapper.ts";
 import { getRelationshipEdgeStyle } from "./graphTokens.ts";
 
@@ -22,7 +23,7 @@ export type FetchNodeChildrenFn = (
   repositoryId: string,
   parentNodeId: string,
   options?: { signal?: AbortSignal }
-) => Promise<NodeChildrenResponse>;
+) => Promise<NodeChildrenResponse | EntityChildrenResponse>;
 
 /**
  * Checks whether an entity type is known to be a leaf entity in standard software ASTs.
@@ -369,7 +370,13 @@ export function collapseNodeDescendants(
  * Provides realistic software repository hierarchy data for prototype exploration
  * until Developer A's revised backend contract is finalized.
  */
-export const mockFetchNodeChildren: FetchNodeChildrenFn = async (
+export type MockFetchNodeChildrenFn = (
+  repositoryId: string,
+  parentNodeId: string,
+  options?: { signal?: AbortSignal }
+) => Promise<NodeChildrenResponse>;
+
+export const mockFetchNodeChildren: MockFetchNodeChildrenFn = async (
   _repositoryId: string,
   parentNodeId: string,
   options?: { signal?: AbortSignal }
@@ -578,3 +585,39 @@ export const mockFetchNodeChildren: FetchNodeChildrenFn = async (
     relationships: [],
   };
 };
+
+/**
+ * Merges newly fetched neighbor nodes and incident relationships into existing React Flow state.
+ */
+export function mergeNeighborData(
+  existingNodes: Node<EntityNodeData>[],
+  existingEdges: Edge[],
+  centerNode: Node<EntityNodeData>,
+  neighborNodes: GraphNodeModel[],
+  relationships: GraphRelationshipModel[],
+  options: MergeGraphOptions = {}
+): {
+  mergedNodes: Node<EntityNodeData>[];
+  mergedEdges: Edge[];
+  addedNodeIds: string[];
+} {
+  return mergeGraphData(
+    existingNodes,
+    existingEdges,
+    centerNode,
+    neighborNodes,
+    relationships,
+    options
+  );
+}
+
+/**
+ * Adapter allowing getEntityChildren from lib/api.ts to be passed as a FetchNodeChildrenFn.
+ */
+export async function fetchEntityChildrenAdapter(
+  repositoryId: string,
+  parentNodeId: string,
+  options?: { signal?: AbortSignal }
+): Promise<EntityChildrenResponse> {
+  return getEntityChildren(repositoryId, parentNodeId, options);
+}

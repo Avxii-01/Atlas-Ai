@@ -179,8 +179,16 @@ export default function RepositoryGraphView({
         loadingNodeIdsRef.current = nextLoad;
         setLoadingNodeIds(nextLoad);
 
+        // Normalize child nodes across both EntityChildrenResponse (.children) and NodeChildrenResponse (.nodes)
+        const childNodes =
+          "children" in response && Array.isArray(response.children)
+            ? response.children
+            : "nodes" in response && Array.isArray(response.nodes)
+            ? response.nodes
+            : [];
+
         // Handle empty child response
-        if (!response.nodes || response.nodes.length === 0) {
+        if (!childNodes || childNodes.length === 0) {
           setNodes((prevNodes) =>
             prevNodes.map((n) =>
               n.id === nodeId
@@ -207,8 +215,8 @@ export default function RepositoryGraphView({
           latestNodes,
           latestEdges,
           parentNodeToExpand,
-          response.nodes,
-          response.relationships,
+          childNodes,
+          response.relationships || [],
           {
             onToggleExpand: (id: string) => {
               void handleToggleExpandRef.current(id);

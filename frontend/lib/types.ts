@@ -59,15 +59,137 @@ export interface GraphRelationshipModel {
 }
 
 /**
+ * Overview pagination and truncation metadata accompanying bounded repository overview responses.
+ */
+export interface OverviewMetadata {
+  view: string;
+  total_files: number;
+  returned_files: number;
+  has_more: boolean;
+  truncated: boolean;
+  offset: number;
+  limit: number;
+}
+
+/**
  * API response contract for GET /api/v1/repositories/{repository_id}/graph.
  */
 export interface RepositoryGraphResponse {
   repository_id: string;
   nodes: GraphNodeModel[];
   relationships: GraphRelationshipModel[];
+  metadata?: OverviewMetadata | null;
 }
 
 export type GraphFetchStatus = "idle" | "loading" | "success" | "empty" | "error";
+
+/**
+ * Response payload for GET /api/v1/repositories/{repository_id}/entities/{entity_id}/children.
+ */
+export interface EntityChildrenResponse {
+  repository_id: string;
+  parent_id: string;
+  parent: GraphNodeModel;
+  children: GraphNodeModel[];
+  relationships: GraphRelationshipModel[];
+  total_children: number;
+  returned_children: number;
+  has_more: boolean;
+  truncated: boolean;
+  offset: number;
+  limit: number;
+}
+
+/**
+ * Relationship direction filter for neighbor queries.
+ */
+export type NeighborDirection = "incoming" | "outgoing" | "both";
+
+/**
+ * Response payload for GET /api/v1/repositories/{repository_id}/entities/{entity_id}/neighbors.
+ */
+export interface EntityNeighborsResponse {
+  repository_id: string;
+  entity_id: string;
+  center: GraphNodeModel;
+  neighbors: GraphNodeModel[];
+  relationships: GraphRelationshipModel[];
+  total_relationships: number;
+  returned_relationships: number;
+  total_neighbors: number;
+  returned_neighbors: number;
+  direction: NeighborDirection | string;
+  has_more: boolean;
+  truncated: boolean;
+  offset: number;
+  limit: number;
+}
+
+/**
+ * Response payload for GET /api/v1/repositories/{repository_id}/entities/search.
+ */
+export interface EntitySearchResponse {
+  repository_id: string;
+  query: string;
+  entities: GraphNodeModel[];
+  results: GraphNodeModel[];
+  total_matches: number;
+  returned_matches: number;
+  has_more: boolean;
+  truncated: boolean;
+  offset: number;
+  limit: number;
+  type_filter?: string | null;
+}
+
+/**
+ * Options for getRepositoryGraph API requests.
+ */
+export interface GetRepositoryGraphOptions {
+  limit?: number;
+  offset?: number;
+  view?: string;
+  signal?: AbortSignal;
+}
+
+/**
+ * Options for getRepositoryOverview API requests.
+ */
+export interface GetRepositoryOverviewOptions {
+  limit?: number;
+  offset?: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * Options for getEntityChildren API requests.
+ */
+export interface GetEntityChildrenOptions {
+  limit?: number;
+  offset?: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * Options for getEntityNeighbors API requests.
+ */
+export interface GetEntityNeighborsOptions {
+  direction?: NeighborDirection;
+  types?: string;
+  limit?: number;
+  offset?: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * Options for searchRepositoryEntities API requests.
+ */
+export interface SearchRepositoryEntitiesOptions {
+  type?: string;
+  limit?: number;
+  offset?: number;
+  signal?: AbortSignal;
+}
 
 /**
  * Target entity model whose impact was analyzed (P0-20, P0-23).
