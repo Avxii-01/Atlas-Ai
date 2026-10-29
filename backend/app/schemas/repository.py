@@ -83,6 +83,20 @@ class RelationshipModel(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional relationship metadata")
 
 
+class OverviewMetadata(BaseModel):
+    """Pagination and truncation metadata accompanying bounded repository overview responses."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    view: str = Field(default="overview", description="Active graph view name ('overview')")
+    total_files: int = Field(..., description="Total count of files in the repository")
+    returned_files: int = Field(..., description="Count of files included in this response page")
+    has_more: bool = Field(..., description="Whether more file pages are available")
+    truncated: bool = Field(..., description="Whether the file collection is truncated")
+    offset: int = Field(..., description="Pagination offset applied")
+    limit: int = Field(..., description="Pagination limit applied")
+
+
 class RepositoryGraphResponse(BaseModel):
     """Response payload for GET /api/v1/repositories/{repository_id}/graph."""
 
@@ -91,6 +105,7 @@ class RepositoryGraphResponse(BaseModel):
     repository_id: str = Field(..., description="Deterministic repository identifier")
     nodes: list[NodeModel] = Field(default_factory=list, description="List of graph nodes")
     relationships: list[RelationshipModel] = Field(default_factory=list, description="List of graph relationship edges")
+    metadata: OverviewMetadata | None = Field(default=None, description="Overview pagination and truncation metadata")
 
 
 class TargetEntityModel(BaseModel):

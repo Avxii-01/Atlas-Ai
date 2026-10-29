@@ -681,3 +681,90 @@ def test_get_entity_by_id_with_neo4j_record():
     assert isinstance(custom_entity, Function)
     assert custom_entity.name == "my_fn"
 
+
+def test_get_repository_overview_bounded_cypher_and_parameters():
+    """Verify get_repository_overview executes a bounded, parameterized, read-only Cypher query."""
+    mock_session = MagicMock(spec=Session)
+
+    repo_dict = {"id": "repo::test", "name": "test", "source": "/test"}
+    file_dicts = [
+        {"id": "repo::test::file::a.py", "repo_id": "repo::test", "path": "a.py", "language": "python", "start_line": 1, "end_line": 10},
+        {"id": "repo::test::file::b.py", "repo_id": "repo::test", "path": "b.py", "language": "python", "start_line": 1, "end_line": 20},
+    ]
+    edge_dicts = [
+        {"source_id": "repo::test", "target_id": "repo::test::file::a.py", "rel_type": "CONTAINS", "properties": {}},
+        {"source_id": "repo::test", "target_id": "repo::test::file::b.py", "rel_type": "CONTAINS", "properties": {}},
+    ]
+
+    mock_record = Record(
+        [
+            ("repo_props", repo_dict),
+            ("total_files", 10),
+            ("files", file_dicts),
+            ("edges", edge_dicts),
+        ]
+    )
+    mock_session.run.return_value.single.return_value = mock_record
+
+    retriever = GraphRetriever()
+    res = retriever.get_repository_overview("repo::test", limit=2, offset=0, session=mock_session)
+
+    assert res is not None
+    repo, files, relationships, total_files = res
+    assert repo.id == "repo::test"
+    assert len(files) == 2
+    assert files[0].path == "a.py"
+    assert files[1].path == "b.py"
+    assert len(relationships) == 2
+    assert total_files == 10
+
+    # Verify Cypher query and parameters
+    mock_session.run.assert_called_once()
+    executed_query, executed_params = mock_session.run.call_args[0][0], mock_session.run.call_args[1]
+
+    assert executed_params["repo_id"] == "repo::test"
+    assert executed_params["limit"] == 2
+    assert executed_params["offset"] == 0
+    assert isinstance(executed_params["limit"], int)
+    assert isinstance(executed_params["offset"], int)
+
+    # Cypher structure assertions: must be read-only and use subqueries with LIMIT
+    assert "MATCH (r:Repository {id: $repo_id})" in executed_query
+    assert "SKIP $offset" in executed_query
+    assert "LIMIT $limit" in executed_query
+    assert "count(f_count)" in executed_query
+
+    forbidden_keywords = {"CREATE", "MERGE", "SET", "DELETE", "REMOVE", "DROP"}
+    tokens = executed_query.upper().split()
+    for forbidden in forbidden_keywords:
+        assert forbidden not in tokens, f"Query contains forbidden keyword '{forbidden}': {executed_query}"
+
+
+def test_get_repository_overview_empty_and_missing():
+    """Verify get_repository_overview handles empty repository (200 with 0 files) and missing repository (None)."""
+    mock_session = MagicMock(spec=Session)
+    retriever = GraphRetriever()
+
+    # 1. Missing scenario
+    mock_session.run.return_value.single.return_value = None
+    assert retriever.get_repository_overview("repo::missing", session=mock_session) is None
+
+    # 2. Empty scenario
+    empty_record = Record(
+        [
+            ("repo_props", {"id": "repo::empty", "name": "empty", "source": "/empty"}),
+            ("total_files", 0),
+            ("files", []),
+            ("edges", []),
+        ]
+    )
+    mock_session.run.return_value.single.return_value = empty_record
+    res = retriever.get_repository_overview("repo::empty", session=mock_session)
+    assert res is not None
+    repo, files, relationships, total_files = res
+    assert repo.id == "repo::empty"
+    assert files == []
+    assert relationships == []
+    assert total_files == 0
+
+

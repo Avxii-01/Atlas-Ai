@@ -28,6 +28,7 @@ from app.schemas.repository import (
     AnalysisSummary,
     ImpactedEntityModel,
     NodeModel,
+    OverviewMetadata,
     RelationshipModel,
     RepositoryAnalysisRequest,
     RepositoryAnalysisResponse,
@@ -604,6 +605,8 @@ class RepositoryService:
         repository_id: str,
         session: Session | None = None,
         limit: int | None = None,
+        view: str | None = None,
+        offset: int = 0,
     ) -> RepositoryGraphResponse:
         """Retrieve persisted repository graph from Neo4j and return serialized nodes and edges.
 
@@ -611,17 +614,33 @@ class RepositoryService:
             repository_id: Stable identifier of the repository to retrieve.
             session: Optional caller-managed Neo4j Session for testing.
             limit: Optional maximum number of nodes to return.
+            view: Optional graph view mode ('overview' for bounded file overview).
+            offset: Optional pagination offset for files in overview mode.
 
         Returns:
             RepositoryGraphResponse matching docs/API.md contract.
 
         Raises:
             HTTPException:
-                400: If repository_id is malformed or invalid.
+                400: If repository_id or query parameter is malformed or invalid.
                 404: If repository does not exist in Neo4j.
                 503: If Neo4j database is unreachable.
                 500: If graph retrieval fails with an internal error.
         """
+        if view is not None:
+            view_clean = view.strip().lower()
+            if view_clean == "overview":
+                return self.get_repository_overview(
+                    repository_id=repository_id,
+                    limit=limit,
+                    offset=offset,
+                    session=session,
+                )
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid view '{view}'. Supported views: 'overview'",
+            )
+
         clean_repo_id = validate_repository_id(repository_id)
 
         # Acquire database driver if session is not explicitly provided
@@ -655,6 +674,154 @@ class RepositoryService:
             repository_id=clean_repo_id,
             nodes=nodes,
             relationships=relationships,
+        )
+
+    def get_repository_overview(
+        self,
+        repository_id: str,
+        limit: int | None = None,
+        offset: int = 0,
+        session: Session | None = None,
+    ) -> RepositoryGraphResponse:
+        """Retrieve bounded repository overview containing Repository root and paged File nodes.
+
+        Args:
+            repository_id: Stable identifier of the repository to retrieve.
+            limit: Maximum number of File nodes to return (default 50, max 200).
+            offset: Pagination offset for files (default 0).
+            session: Optional caller-managed Neo4j Session for testing.
+
+        Returns:
+            RepositoryGraphResponse with nodes, CONTAINS edges, and OverviewMetadata.
+        """
+        clean_repo_id = validate_repository_id(repository_id)
+
+        effective_limit = limit if limit is not None else 50
+        if effective_limit < 1:
+            raise HTTPException(status_code=400, detail="Limit must be >= 1")
+        if effective_limit > 200:
+            raise HTTPException(status_code=400, detail="Overview limit cannot exceed 200")
+        if offset < 0:
+            raise HTTPException(status_code=400, detail="Offset must be >= 0")
+
+        # Acquire database driver if session is not explicitly provided
+        active_driver = self.driver
+        if active_driver is None and session is None:
+            try:
+                active_driver = self._get_driver()
+            except Neo4jConnectionError:
+                raise HTTPException(status_code=503, detail="Database service unavailable") from None
+
+        try:
+            retriever = GraphRetriever(driver=active_driver)
+            overview_data = retriever.get_repository_overview(
+                clean_repo_id,
+                limit=effective_limit,
+                offset=offset,
+                session=session,
+            )
+        except Neo4jConnectionError:
+            raise HTTPException(status_code=503, detail="Database service unavailable") from None
+        except Exception as exc:
+            logger.error(
+                "Failed to retrieve repository overview for '%s': %s",
+                clean_repo_id,
+                type(exc).__name__,
+                exc_info=True,
+            )
+            raise HTTPException(status_code=500, detail="Failed to retrieve repository graph") from None
+
+        if overview_data is None:
+            raise HTTPException(status_code=404, detail=f"Repository '{clean_repo_id}' not found")
+
+        repo, files, relationships, total_files = overview_data
+
+        nodes: list[NodeModel] = [
+            NodeModel(
+                id=repo.id,
+                label="Repository",
+                name=repo.name,
+                type="Repository",
+                display_name=repo.name,
+                properties={
+                    "name": repo.name,
+                    "source": repo.source,
+                    "created_at": repo.created_at,
+                },
+            )
+        ]
+
+        seen_node_ids = {repo.id}
+        for f in files:
+            if f.id not in seen_node_ids:
+                seen_node_ids.add(f.id)
+                nodes.append(
+                    NodeModel(
+                        id=f.id,
+                        label="File",
+                        name=f.path,
+                        type="File",
+                        display_name=f.path,
+                        properties={
+                            "repo_id": f.repo_id,
+                            "path": f.path,
+                            "language": f.language,
+                            "start_line": f.start_line,
+                            "end_line": f.end_line,
+                            "start_byte": f.start_byte,
+                            "end_byte": f.end_byte,
+                        },
+                    )
+                )
+
+        # Enforce endpoint presence invariant: every edge must connect returned nodes
+        valid_node_ids = {n.id for n in nodes}
+        seen_edge_ids: set[str] = set()
+        rel_models: list[RelationshipModel] = []
+        for rel in relationships:
+            if rel.source_id not in valid_node_ids or rel.target_id not in valid_node_ids:
+                continue
+            edge_id = f"{rel.source_id}->{rel.rel_type.value}->{rel.target_id}"
+            if edge_id in seen_edge_ids:
+                continue
+            seen_edge_ids.add(edge_id)
+            props = relationship_to_properties(rel)
+            rel_models.append(
+                RelationshipModel(
+                    id=edge_id,
+                    source=rel.source_id,
+                    target=rel.target_id,
+                    type=rel.rel_type.value,
+                    source_id=rel.source_id,
+                    target_id=rel.target_id,
+                    rel_type=rel.rel_type.value,
+                    properties=props,
+                    metadata=dict(rel.metadata),
+                )
+            )
+
+        # Deterministic relationship sort: (source, type, target, id)
+        rel_models.sort(key=lambda r: (r.source, r.type, r.target, r.id))
+
+        returned_files = len(files)
+        has_more = (offset + returned_files) < total_files
+        truncated = total_files > returned_files
+
+        metadata = OverviewMetadata(
+            view="overview",
+            total_files=total_files,
+            returned_files=returned_files,
+            has_more=has_more,
+            truncated=truncated,
+            offset=offset,
+            limit=effective_limit,
+        )
+
+        return RepositoryGraphResponse(
+            repository_id=clean_repo_id,
+            nodes=nodes,
+            relationships=rel_models,
+            metadata=metadata,
         )
 
     def analyze_impact(

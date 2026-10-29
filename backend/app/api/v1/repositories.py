@@ -37,15 +37,22 @@ def analyze_repository(
     response_model=RepositoryGraphResponse,
     status_code=200,
     summary="Retrieve repository code knowledge graph",
-    description="Returns persisted nodes and relationships for a repository from Neo4j.",
+    description="Returns persisted nodes and relationships for a repository from Neo4j. Supports 'view=overview' for a bounded initial view.",
 )
 def get_repository_graph(
     repository_id: str,
-    limit: int | None = Query(default=None, ge=1, description="Optional maximum number of nodes to return"),
+    view: str | None = Query(default=None, description="Optional view filter ('overview')"),
+    limit: int | None = Query(default=None, ge=1, description="Optional maximum number of nodes to return for full graph, or maximum file entities for overview (max 200)"),
+    offset: int = Query(default=0, ge=0, description="Optional pagination offset for file entities in overview mode"),
     service: RepositoryService = Depends(get_repository_service),
 ) -> RepositoryGraphResponse:
     """Retrieve repository graph from Neo4j and return serialized nodes and relationships."""
-    return service.get_repository_graph(repository_id=repository_id, limit=limit)
+    return service.get_repository_graph(
+        repository_id=repository_id,
+        limit=limit,
+        view=view,
+        offset=offset,
+    )
 
 
 @router.get(

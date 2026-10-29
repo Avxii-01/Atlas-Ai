@@ -376,6 +376,110 @@ class GraphRetriever:
             if is_managed:
                 sess.close()
 
+    def get_repository_overview(
+        self,
+        repo_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        session: Session | None = None,
+    ) -> tuple[Repository, list[File], list[Relationship], int] | None:
+        """Retrieve bounded repository overview containing Repository root and paged File nodes.
+
+        Executes a single parameterized Cypher query with database-side bounding.
+        Returns None if repository does not exist.
+        """
+        if not repo_id or not isinstance(repo_id, str):
+            raise ValueError("repo_id must be a non-empty string")
+
+        sess, is_managed = self._get_session(session)
+        try:
+            cypher = (
+                "MATCH (r:Repository {id: $repo_id})\n"
+                "CALL {\n"
+                "  WITH r\n"
+                "  OPTIONAL MATCH (r)-[:CONTAINS]->(f_count:File {repo_id: $repo_id})\n"
+                "  RETURN count(f_count) AS total_files\n"
+                "}\n"
+                "CALL {\n"
+                "  WITH r\n"
+                "  OPTIONAL MATCH (r)-[rel:CONTAINS]->(f:File {repo_id: $repo_id})\n"
+                "  WHERE f IS NOT NULL\n"
+                "  WITH rel, f\n"
+                "  ORDER BY f.path ASC\n"
+                "  SKIP $offset\n"
+                "  LIMIT $limit\n"
+                "  RETURN collect(properties(f)) AS files,\n"
+                "         collect({\n"
+                "           source_id: r.id,\n"
+                "           target_id: f.id,\n"
+                "           rel_type: type(rel),\n"
+                "           properties: properties(rel)\n"
+                "         }) AS edges\n"
+                "}\n"
+                "RETURN\n"
+                "  properties(r) AS repo_props,\n"
+                "  total_files,\n"
+                "  files,\n"
+                "  edges"
+            )
+            res = sess.run(
+                cypher,
+                repo_id=repo_id,
+                offset=int(offset),
+                limit=int(limit),
+            ).single()
+
+            if res is None or res.get("repo_props") is None:
+                return None
+
+            repo = record_to_entity(NodeLabel.REPOSITORY.value, res["repo_props"])
+            total_files = int(res.get("total_files", 0))
+
+            files: list[File] = []
+            for f_props in res.get("files") or []:
+                if f_props:
+                    files.append(record_to_entity(NodeLabel.FILE.value, f_props))
+
+            relationships: list[Relationship] = []
+            for edge_dict in res.get("edges") or []:
+                if edge_dict and edge_dict.get("source_id") and edge_dict.get("target_id"):
+                    relationships.append(
+                        record_to_relationship(
+                            source_id=edge_dict["source_id"],
+                            target_id=edge_dict["target_id"],
+                            rel_type=edge_dict["rel_type"],
+                            properties=dict(edge_dict.get("properties") or {}),
+                        )
+                    )
+
+            logger.info(
+                "Retrieved overview for repository %s (%d files returned of %d total)",
+                repo_id,
+                len(files),
+                total_files,
+            )
+            return repo, files, relationships, total_files
+        except Neo4jRetrievalError:
+            raise
+        except Exception as exc:
+            logger.error("Failed to retrieve repository overview for %s: %s", repo_id, type(exc).__name__)
+            raise Neo4jRetrievalError(f"Failed to retrieve repository overview: {type(exc).__name__}") from None
+        finally:
+            if is_managed:
+                sess.close()
+
+
+def get_repository_overview(
+    repo_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    driver: Driver | None = None,
+    session: Session | None = None,
+) -> tuple[Repository, list[File], list[Relationship], int] | None:
+    """Functional convenience entry point to retrieve a bounded repository overview."""
+    retriever = GraphRetriever(driver=driver)
+    return retriever.get_repository_overview(repo_id, limit=limit, offset=offset, session=session)
+
 
 def get_repository_graph(
     repo_id: str,
