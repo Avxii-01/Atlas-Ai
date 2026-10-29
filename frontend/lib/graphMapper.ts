@@ -4,6 +4,7 @@ import type {
   GraphNodeModel,
   GraphRelationshipModel,
 } from "./types.ts";
+import { getRelationshipEdgeStyle, type EdgeStyle } from "./graphTokens.ts";
 
 export interface EntityNodeData extends Record<string, unknown> {
   id: string;
@@ -12,6 +13,11 @@ export interface EntityNodeData extends Record<string, unknown> {
   type: string;
   displayName: string;
   properties: Record<string, unknown>;
+  isExpandable?: boolean;
+  isExpanded?: boolean;
+  isLoadingChildren?: boolean;
+  hasNoChildren?: boolean;
+  onToggleExpand?: (nodeId: string) => void;
 }
 
 /**
@@ -106,21 +112,10 @@ export function computeNodePositions(
 
 /**
  * Maps edge relationship types to subtle, distinguished visual edge styles.
+ * Delegates to centralized graphTokens definition.
  */
-function getEdgeStyle(type: string): { stroke: string; strokeWidth: number } {
-  const upper = (type || "").toUpperCase();
-  switch (upper) {
-    case "CONTAINS":
-      return { stroke: "#64748b", strokeWidth: 1.5 }; // Slate
-    case "IMPORTS":
-      return { stroke: "#60a5fa", strokeWidth: 1.5 }; // Blue
-    case "CALLS":
-      return { stroke: "#34d399", strokeWidth: 1.5 }; // Emerald
-    case "INHERITS":
-      return { stroke: "#fbbf24", strokeWidth: 1.5 }; // Amber
-    default:
-      return { stroke: "#94a3b8", strokeWidth: 1.5 };
-  }
+export function getEdgeStyle(type: string): EdgeStyle {
+  return getRelationshipEdgeStyle(type);
 }
 
 /**

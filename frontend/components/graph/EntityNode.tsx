@@ -3,35 +3,20 @@
 import React, { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import type { EntityNodeData } from "../../lib/graphMapper.ts";
+import { getEntityBadgeStyle, type EntityBadgeStyle } from "../../lib/graphTokens.ts";
 
 /**
  * Returns a theme badge color class or background based on entity kind.
+ * Delegates to centralized graphTokens definition.
  */
-function getBadgeStyle(label: string): { bg: string; text: string; border: string } {
-  const kind = (label || "").toLowerCase();
-  switch (kind) {
-    case "repository":
-      return { bg: "rgba(168, 85, 247, 0.15)", text: "#c084fc", border: "rgba(168, 85, 247, 0.35)" };
-    case "file":
-      return { bg: "rgba(59, 130, 246, 0.15)", text: "#60a5fa", border: "rgba(59, 130, 246, 0.35)" };
-    case "module":
-      return { bg: "rgba(6, 182, 212, 0.15)", text: "#22d3ee", border: "rgba(6, 182, 212, 0.35)" };
-    case "class":
-      return { bg: "rgba(99, 102, 241, 0.15)", text: "#a5b4fc", border: "rgba(99, 102, 241, 0.35)" };
-    case "function":
-      return { bg: "rgba(16, 185, 129, 0.15)", text: "#34d399", border: "rgba(16, 185, 129, 0.35)" };
-    case "method":
-      return { bg: "rgba(20, 184, 166, 0.15)", text: "#2dd4bf", border: "rgba(20, 184, 166, 0.35)" };
-    case "import":
-      return { bg: "rgba(245, 158, 11, 0.15)", text: "#fbbf24", border: "rgba(245, 158, 11, 0.35)" };
-    default:
-      return { bg: "rgba(148, 163, 184, 0.15)", text: "#cbd5e1", border: "rgba(148, 163, 184, 0.3)" };
-  }
+export function getBadgeStyle(label: string): EntityBadgeStyle {
+  return getEntityBadgeStyle(label);
 }
 
 /**
  * Custom React Flow node component for Atlas AI code entities.
- * Displays the entity type badge, readable display label, and connection handles.
+ * Displays the entity type badge, readable display label, connection handles,
+ * and progressive exploration expand/collapse toggle button (Checkpoint 4).
  */
 function EntityNodeComponent({
   id,
@@ -39,10 +24,19 @@ function EntityNodeComponent({
   selected,
 }: NodeProps & { data: EntityNodeData }) {
   const badgeStyle = getBadgeStyle(data.label || data.type);
+  const canExpand = data.isExpandable !== false && typeof data.onToggleExpand === "function";
+
+  const handleToggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (data.isLoadingChildren || data.hasNoChildren) return;
+    data.onToggleExpand?.(id);
+  };
 
   return (
     <div
-      className={`entity-node-container ${selected ? "entity-node-selected" : ""}`}
+      className={`entity-node-container ${selected ? "entity-node-selected" : ""} ${
+        data.isExpanded ? "entity-node-expanded" : ""
+      }`}
       data-testid={`graph-node-${id}`}
       data-entity-type={data.type}
       title={`${data.label}: ${data.displayName} (${id})`}
@@ -65,6 +59,45 @@ function EntityNodeComponent({
           >
             {data.label || data.type}
           </span>
+
+          {canExpand && (
+            <button
+              type="button"
+              className={`btn-node-expand ${data.isExpanded ? "expanded" : ""} ${
+                data.hasNoChildren ? "empty" : ""
+              }`}
+              onClick={handleToggle}
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              disabled={data.isLoadingChildren || data.hasNoChildren}
+              aria-expanded={data.isExpanded || false}
+              aria-label={
+                data.hasNoChildren
+                  ? `No children for ${data.displayName}`
+                  : data.isExpanded
+                  ? `Collapse children of ${data.displayName}`
+                  : `Expand children of ${data.displayName}`
+              }
+              title={
+                data.hasNoChildren
+                  ? "No child entities found"
+                  : data.isExpanded
+                  ? "Collapse children"
+                  : "Expand direct children"
+              }
+              data-testid={`btn-toggle-expand-${id}`}
+            >
+              {data.isLoadingChildren ? (
+                <span className="expand-spinner" aria-hidden="true" />
+              ) : data.hasNoChildren ? (
+                "•"
+              ) : data.isExpanded ? (
+                "−"
+              ) : (
+                "+"
+              )}
+            </button>
+          )}
         </div>
 
         <div className="entity-node-label" title={data.displayName}>
